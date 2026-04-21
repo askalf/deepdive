@@ -1,0 +1,67 @@
+{
+  "name": "@askalf/deepdive",
+  "version": "0.1.0",
+  "description": "A local research agent. One command, cited answer. Routes every LLM call through your own proxy (dario, Anthropic-compat, OpenAI-compat). Headless browser + pluggable search + multi-provider LLM — zero hosted dependencies.",
+  "type": "module",
+  "bin": {
+    "deepdive": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "DISCLAIMER.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test --test-concurrency=4 test/*.test.mjs",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "research",
+    "agent",
+    "llm",
+    "local",
+    "cli",
+    "anthropic",
+    "openai",
+    "claude",
+    "search",
+    "deep-research",
+    "perplexity-alternative",
+    "cite",
+    "citations",
+    "self-hosted"
+  ],
+  "author": "askalf (https://github.com/askalf)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/askalf/deepdive.git"
+  },
+  "homepage": "https://github.com/askalf/deepdive",
+  "bugs": {
+    "url": "https://github.com/askalf/deepdive/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "playwright": "^1.47.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
