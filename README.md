@@ -1,113 +1,170 @@
 <p align="center">
   <h1 align="center">deepdive</h1>
-  <p align="center"><strong>A local research agent. One command, cited answer.</strong><br>Decomposes your question into sub-queries, runs web searches, fetches pages through a real headless browser, and hands everything to an LLM that writes a cited markdown report. Every LLM call goes through your own router — default target is <a href="https://github.com/askalf/dario">dario</a> at <code>localhost:3456</code>, so synthesis runs on your Claude Max subscription, your own OpenAI key, or any local model. Any Anthropic-compat endpoint works.</p>
+  <p align="center"><strong>Open-source Perplexity for your own machine, running on your own Claude Max subscription.</strong><br>Ask it a question. It plans sub-queries, searches the web, reads the pages in a real browser, iterates with a critic loop until the answer stops having gaps, and hands you a cited markdown report. Every LLM call routes through <a href="https://github.com/askalf/dario">dario</a> (or any Anthropic-compat endpoint), so the 30-to-60 calls a single deep query burns bill against <em>your</em> subscription — not a hosted tool's margin on top of a hosted tool's margin.</p>
 </p>
 
 <p align="center"><em>Zero hosted dependencies. MIT. Independent, unofficial, third-party — see <a href="DISCLAIMER.md">DISCLAIMER.md</a>.</em></p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@askalf/deepdive"><img src="https://img.shields.io/npm/v/@askalf/deepdive?color=blue" alt="npm version"></a>
+  <a href="https://github.com/askalf/deepdive/actions/workflows/ci.yml"><img src="https://github.com/askalf/deepdive/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/askalf/deepdive/blob/master/LICENSE"><img src="https://img.shields.io/npm/l/@askalf/deepdive" alt="License"></a>
+</p>
+
+---
+
+## The point
+
+Hosted research tools (Perplexity, OpenAI Deep Research, Gemini Deep Research, etc.) solve a real problem: one question → plan → search → read → cited answer. They also:
+
+- Send every query to their server.
+- Charge a subscription fee on top of whatever LLM you're already paying for.
+- Pick the model, the search backend, the fetch policy, the prompt, and the citation style for you.
+- Cap research depth so it fits their unit economics — not your question.
+
+deepdive does the same work, but the plan runs on your laptop, the LLM calls go through a router you control, the search adapter is yours to swap, and there is no cap on how deep the loop goes beyond the one you set on the command line. With `--deep`, a critic LLM reviews the draft answer, names the unanswered parts, and the loop runs again until the critic says it's complete. Paired with dario → Claude Max, every one of those iterations bills against the subscription you already pay for.
+
+That's the product. The rest of this README is the operator's manual.
 
 ---
 
 ## 60 seconds
 
 ```bash
-# 1. Have dario running (or any Anthropic-compat endpoint at a local URL).
-#    See: https://github.com/askalf/dario
-dario proxy   # http://localhost:3456, routes to Claude Max, OpenAI, etc.
+# 1. Start dario (your local LLM router — https://github.com/askalf/dario).
+dario proxy                         # http://localhost:3456, routes to Claude Max, OpenAI, etc.
 
 # 2. Install deepdive.
 npm install -g @askalf/deepdive
-npx playwright install chromium   # first run only, ~300 MB
+npx playwright install chromium     # first run only, ~300 MB
 
 # 3. Ask.
-deepdive "how does claude's rate limiter work"
+deepdive "how does claude's rate limiter work" --deep --verbose --out=report.md
 ```
 
-Output is cited markdown printed to stdout. Pipe it, save it with `--out=report.md`, or stream progress with `--verbose`:
+`--deep` turns on the critic loop (2 extra rounds by default). `--verbose` streams every plan / search / fetch / critique step to stderr so you can watch the agent think. `--out` writes the final cited markdown to a file in addition to stdout.
 
-```bash
-deepdive "how does claude's rate limiter work" --verbose --out=rate-limiter.md
+Pipe it, grep it, stick it in your research folder. It's plain markdown.
+
+---
+
+## What the output looks like
+
+A real deepdive run produces a file like this (excerpt):
+
+```markdown
+# how does claude's rate limiter work
+
+Claude's rate limiter uses a two-tier rolling window: a **5-hour bucket**
+and a **7-day bucket**, both scoped per OAuth session [1][2]. Requests
+are billed against the short-term bucket first; when that window is
+exhausted, the `representative-claim` response header switches from
+`five_hour` to `seven_day` and Anthropic begins charging against the
+longer bucket — still subscription billing, not API overage [3].
+
+Exhausting both buckets triggers `overage` state, at which point per-token
+Extra Usage charges apply if the account has enabled them; otherwise the
+request gets a 429 [3][4]. The `anthropic-ratelimit-unified-*` response
+headers expose the current utilization at request-response time so
+clients can pool-balance intelligently [5].
+
+...
+
+## Sources
+
+1. [Anthropic rate-limit headers docs](https://docs.anthropic.com/...) — fetched 2026-04-22
+2. [Claude Code /usage command reference](https://code.claude.com/...) — fetched 2026-04-22
+3. [Discussion #32 — seven_day claim explainer](https://github.com/...) — fetched 2026-04-22
+4. [Anthropic overage billing documentation](https://docs.anthropic.com/...) — fetched 2026-04-22
+5. [dario pool-mode implementation notes](https://github.com/...) — fetched 2026-04-22
 ```
 
-Under the hood:
-1. **Plan.** LLM decomposes your question into 3–5 searchable sub-queries.
-2. **Search.** DuckDuckGo HTML by default (no API key). Pluggable: `--search=searxng|brave|tavily` with your own endpoint or key.
-3. **Fetch.** Playwright-driven Chromium renders each result page (JS-rendered SPAs included). Parallelized via `--concurrency`, cached to `~/.deepdive/cache/` (1h TTL by default) so re-running is free.
-4. **Extract.** Boilerplate stripped, main content capped to a word budget.
-5. **Synthesize.** LLM writes the answer with inline `[N]` citations referencing the source list.
-6. **Critique (optional, `--deep`).** LLM reviews its own draft, names the gaps, proposes follow-up queries, loop re-runs until the critic says done or `--deep=N` rounds elapse.
+Citations are numbered and inline. The source table at the end records the exact URL and fetch timestamp for every source, so you can verify anything the model claimed.
 
 ---
 
 ## Why this exists
 
-Every hosted research tool (Perplexity, OpenAI Deep Research, Gemini Deep Research) sends your queries to someone else's server, charges per query, and gives you no say in which model synthesizes the answer or which sources get read. deepdive is the self-hosted alternative: your machine, your LLM subscription, your model choice, your search backend.
+Three tools already do this and charge for it. deepdive exists because each one takes a decision away from you:
 
-Pair it with [dario](https://github.com/askalf/dario) and every research query routes through your Claude Max subscription instead of per-token API pricing — a single deep query can be 50k–200k tokens, which is exactly the workload subscription billing was built for.
+| | Perplexity | OpenAI Deep Research | Gemini Deep Research | **deepdive** |
+|---|---|---|---|---|
+| Who runs the agent loop | Their server | Their server | Their server | **Your machine** |
+| Which model synthesizes | Their choice | GPT-5 | Gemini 2.5 Pro | **Any Anthropic-compat model** |
+| Which search backend | Theirs | Theirs | Google | **DDG / SearXNG / Brave / Tavily — your pick** |
+| Who sees your queries | Perplexity + upstream | OpenAI + upstream | Google + upstream | **Only the sites you searched** |
+| How deep can it go | Capped | Capped | Capped | **You set the cap** |
+| Billing path | Their subscription + their margin | GPT-5 tokens, metered | Gemini tokens, metered | **Your existing Claude Max, via dario** |
+| Source code | Closed | Closed | Closed | **Open** |
+
+Pair it with [dario](https://github.com/askalf/dario) and the deep-research workload — which is the single most token-hungry thing a consumer can do with an LLM, 50k to 200k tokens per question once the critic loop kicks in — lands on the subscription Anthropic built for exactly that profile. Per-token API pricing would put a single deep question at a few dollars. Through dario → Claude Max it's part of a flat monthly bill you're already paying.
+
+That's why deepdive and dario are the same product in two pieces. dario is the routing layer that makes your subscription visible to any tool. deepdive is the first tool that uses the routing layer for a workload that nothing else in your toolchain runs.
 
 ---
 
-## LLM routing (default: dario)
+## The `--deep` loop
 
-deepdive speaks the Anthropic Messages API. The default target is `http://localhost:3456` (dario's default port), with `x-api-key: dario`:
+Single-pass mode (no `--deep` flag) is what other local "research CLI" tools do: plan → search → fetch → synthesize → done. Good enough for simple factual lookups. Not great for "explain how X actually works."
 
-```bash
-deepdive "…" --base-url=http://localhost:3456 --api-key=dario --model=claude-sonnet-4-6
+`--deep` adds a critic:
+
+```
+plan ──▶ search ──▶ fetch ──▶ synthesize ──▶ critic ─┐
+                                                      │
+                              ◀───── "here's what's missing, try: q4, q5" ──┘
+                              │
+                              ▼
+                          search ──▶ fetch ──▶ synthesize ──▶ critic ──▶ ...
 ```
 
-Any Anthropic-compat endpoint works. If you already have Claude Code credentials and dario installed, there is nothing else to configure.
+The critic reads its own draft, flags gaps ("the draft didn't source the 429 header format"), and proposes up to three follow-up queries. The loop re-runs with those queries, re-synthesizes from every source gathered so far, and passes to the critic again. When the critic says the draft is complete — or when you hit `--deep=N` rounds — the loop stops.
+
+Bare `--deep` = 2 extra rounds. `--deep=5` = up to 5. `--deep=0` is explicit single-pass.
+
+**What this costs.** Each round is roughly `1 search_llm_call + N page_fetches + 1 synth_llm_call + 1 critic_llm_call`. A 3-round deep query against claude-sonnet-4-6 typically lands 40–80k tokens. On a Claude Max plan via dario: ~free. On per-token API pricing: several dollars. On Perplexity: limited by their internal cap regardless of what you're willing to spend.
+
+---
+
+## Common flags
+
+Run `deepdive --help` for the full list. The ones you'll reach for:
+
+| Flag | Default | Why |
+|---|---|---|
+| `--deep[=<n>]` | off (bare = 2) | Turn on the critic loop. This is the headline feature. |
+| `--model=<name>` | `claude-sonnet-4-6` | Try `claude-opus-4-7` on questions that need real reasoning. |
+| `--search=<adapter>` | `duckduckgo` | `searxng` for privacy, `brave` for quality, `tavily` for research-tuned results. |
+| `--max-sources=<n>` | `12` per round | Upper bound. Deep mode adds sources across rounds, capped each round. |
+| `--concurrency=<n>` | `4` | Parallel fetches. Bump on a fast connection. |
+| `--json` | markdown | Emit `{question, plan, rounds, sources, answer, usage}` for piping. |
+| `--out=<path>` | — | Save to file. |
+| `--verbose`, `-v` | — | Stream plan / search / fetch / critique events to stderr. |
+
+Every flag mirrors a `DEEPDIVE_*` env var. CLI flags win over env.
 
 ---
 
 ## Search adapters
 
+One adapter per backend. Default (DuckDuckGo) needs no key.
+
 | Adapter | Flag | Needs | Notes |
 |---|---|---|---|
-| DuckDuckGo HTML | `--search=duckduckgo` (default) | nothing | Scrapes `html.duckduckgo.com`. No key, no account. Quality is fine for v1; if DDG changes their HTML, the parser may need an update. |
-| SearXNG | `--search=searxng` | `DEEPDIVE_SEARXNG_URL` | Self-hosted metasearch. Best quality/privacy combo. |
-| Brave Search | `--search=brave` | `DEEPDIVE_BRAVE_KEY` | Brave Search API. Paid, but high quality. |
-| Tavily | `--search=tavily` | `DEEPDIVE_TAVILY_KEY` | Research-tuned API. Returns pre-extracted content, which deepdive re-fetches for consistency. |
+| DuckDuckGo HTML | `--search=duckduckgo` (default) | nothing | Scrapes `html.duckduckgo.com`. Good enough for most questions. |
+| SearXNG | `--search=searxng` | `DEEPDIVE_SEARXNG_URL` | Self-hosted metasearch. Best privacy. |
+| Brave Search | `--search=brave` | `DEEPDIVE_BRAVE_KEY` | Paid, high quality. |
+| Tavily | `--search=tavily` | `DEEPDIVE_TAVILY_KEY` | Research-tuned. Returns pre-extracted content; deepdive re-fetches anyway for consistency. |
 
-Adding a new adapter is ~30 lines — implement `SearchAdapter` in `src/search/*.ts` and register in `src/search.ts`.
+Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts`, register in `src/search.ts`.
 
 ---
 
-## Flags
+## Caching
 
-Run `deepdive --help` for the full list. The ones you'll actually use:
+Every successful fetch goes to `~/.deepdive/cache/<sha256>.json` with a 1-hour TTL. A re-run of the same question — or a follow-up run that re-fetches overlapping URLs — never re-opens Chromium for sources it already has. Iteration during question refinement is free.
 
-| Flag | Default | Description |
-|---|---|---|
-| `--base-url=<url>` | `http://localhost:3456` | LLM endpoint (dario / Anthropic / any compat URL) |
-| `--api-key=<key>` | `dario` | LLM key |
-| `--model=<name>` | `claude-sonnet-4-6` | Model for both planning and synthesis |
-| `--search=<adapter>` | `duckduckgo` | Search backend (see table above) |
-| `--max-sources=<n>` | `12` | Total pages fetched per query |
-| `--results-per-query=<n>` | `5` | Candidates pulled per sub-query |
-| `--max-words-per-source=<n>` | `2000` | Per-source content cap before synthesis |
-| `--timeout-ms=<ms>` | `30000` | Per-fetch timeout |
-| `--deep[=<n>]` | off (bare `--deep` = 2) | Critic-driven iterative research: after the initial answer, LLM names gaps and proposes follow-up queries for up to N more rounds |
-| `--concurrency=<n>` | `4` | Parallel page fetches |
-| `--no-cache` | — | Skip the on-disk page cache (default: enabled, 1h TTL) |
-| `--cache-ttl-ms=<ms>` | `3600000` | Cache TTL in ms |
-| `--json` | — | Emit structured JSON (question, plan, rounds, sources, answer, usage) instead of markdown |
-| `--out=<path>` | — | Also write output (markdown or JSON) to file |
-| `--verbose`, `-v` | — | Stream progress events to stderr |
-
-All flags mirror to `DEEPDIVE_*` env vars (e.g. `DEEPDIVE_MODEL`, `DEEPDIVE_MAX_SOURCES`, `DEEPDIVE_DEEP_ROUNDS`, `DEEPDIVE_CONCURRENCY`). CLI flags win over env vars.
-
-### Example: deep iterative research
-
-```bash
-deepdive "compare bun's TLS ClientHello to node's" --deep=3 --verbose --out=tls.md
-```
-
-With `--deep=3`, after the first synthesis the critic can run up to three more rounds of "look at the draft, find what's missing, search for it, re-synthesize." Each round can add up to `--max-sources` new pages, so plan the cap. The loop stops early as soon as the critic says the draft is complete.
-
-### Example: JSON output for piping into other tools
-
-```bash
-deepdive "latest CVE in openssl" --json | jq '.sources[] | .url'
-```
+Disable with `--no-cache` or `DEEPDIVE_NO_CACHE=1`. Change the dir with `DEEPDIVE_CACHE_DIR`. Change the TTL with `--cache-ttl-ms` or `DEEPDIVE_CACHE_TTL_MS`.
 
 ---
 
@@ -121,7 +178,7 @@ import {
   createCache,
 } from "@askalf/deepdive";
 
-const config = resolveConfig({}, process.env);
+const config = resolveConfig({ deepRounds: 2 }, process.env);
 const search = await resolveSearchAdapter(config.searchAdapter, process.env);
 const cache = config.cache.enabled
   ? createCache({ dir: config.cache.dir, ttlMs: config.cache.ttlMs })
@@ -134,15 +191,17 @@ const result = await runAgent("how does claude's rate limiter work", {
   resultsPerQuery: config.resultsPerQuery,
   maxSources: config.maxSources,
   maxWordsPerSource: config.maxWordsPerSource,
-  deepRounds: 2,        // iterate up to 2 extra critic-driven rounds
-  concurrency: 4,       // parallel page fetches
+  deepRounds: config.deepRounds,
+  concurrency: config.concurrency,
   cache,
   onEvent: (e) => console.error(e),
 });
 
 console.log(result.markdown);
-console.log("rounds:", result.usage.rounds, "sources:", result.usage.kept);
+console.log(`rounds: ${result.usage.rounds} · sources: ${result.usage.kept} · cache hits: ${result.usage.cacheHits}`);
 ```
+
+All event types, the round-trace structure, and the browser-factory injection point are exported for programmatic use. See `src/index.ts`.
 
 ---
 
@@ -150,10 +209,9 @@ console.log("rounds:", result.usage.rounds, "sources:", result.usage.kept);
 
 | Signal | Status |
 |---|---|
-| **Source** | One TypeScript package, small enough to audit in an evening |
 | **Runtime dependencies** | One — `playwright`. No hosted services, no telemetry. |
-| **Credentials** | API keys live in env vars or CLI flags; deepdive never persists them |
-| **Network scope** | LLM endpoint (your choice), search backend (your choice), and the actual URLs your LLM picked to read |
+| **Credentials** | API keys live in env vars or CLI flags; deepdive never persists them. Cache files store fetched page content only, never auth. |
+| **Network scope** | LLM endpoint (your choice), search backend (your choice), and the actual URLs your planner picked to read. No other outbound traffic. |
 | **Telemetry** | None. Zero analytics, tracking, or data collection. |
 | **License** | MIT |
 
