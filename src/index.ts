@@ -31,7 +31,16 @@ export {
   renderSourcesMarkdown,
   type Source,
 } from "./citations.js";
-export { callLLM, type LLMConfig, type LLMMessage, type LLMResult } from "./llm.js";
+export {
+  callLLM,
+  LLMError,
+  DEFAULT_LLM_TIMEOUT_MS,
+  DEFAULT_LLM_ATTEMPTS,
+  type LLMConfig,
+  type LLMMessage,
+  type LLMResult,
+} from "./llm.js";
+export { retry, backoffDelay, type RetryOptions } from "./retry.js";
 export { resolveConfig, type RuntimeConfig, type CLIFlags } from "./config.js";
 export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";
 export { runConcurrent } from "./concurrency.js";

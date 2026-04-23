@@ -30,6 +30,8 @@ export interface CLIFlags {
   maxSources?: number;
   maxWordsPerSource?: number;
   timeoutMs?: number;
+  llmTimeoutMs?: number;
+  llmAttempts?: number;
   deepRounds?: number;
   concurrency?: number;
   noCache?: boolean;
@@ -52,6 +54,8 @@ const DEFAULTS = {
   deepRounds: 0,
   concurrency: 4,
   cacheTtlMs: 60 * 60 * 1000, // 1 hour
+  llmTimeoutMs: 120_000, // 2 minutes per LLM call
+  llmAttempts: 3,
 };
 
 export function resolveConfig(
@@ -89,6 +93,16 @@ export function resolveConfig(
     parsePositiveInt(env.DEEPDIVE_FETCH_TIMEOUT_MS) ??
     DEFAULTS.timeoutMs;
 
+  const llmTimeoutMs =
+    flags.llmTimeoutMs ??
+    parsePositiveInt(env.DEEPDIVE_LLM_TIMEOUT_MS) ??
+    DEFAULTS.llmTimeoutMs;
+
+  const llmAttempts =
+    flags.llmAttempts ??
+    parsePositiveInt(env.DEEPDIVE_LLM_ATTEMPTS) ??
+    DEFAULTS.llmAttempts;
+
   const deepRounds =
     flags.deepRounds ??
     parseNonNegativeInt(env.DEEPDIVE_DEEP_ROUNDS) ??
@@ -118,7 +132,14 @@ export function resolveConfig(
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
 
   return {
-    llm: { baseUrl, apiKey, model, maxTokens },
+    llm: {
+      baseUrl,
+      apiKey,
+      model,
+      maxTokens,
+      timeoutMs: llmTimeoutMs,
+      maxAttempts: llmAttempts,
+    },
     browser: {
       headless: env.DEEPDIVE_HEADED === "1" ? false : true,
       timeoutMs,
