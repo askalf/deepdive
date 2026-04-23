@@ -50,6 +50,11 @@ export interface AgentConfig {
   robotsUserAgent?: string;
   robotsCache?: RobotsCache;
   onEvent?: (event: AgentEvent) => void;
+  // Fires for each SSE token emitted by the synthesizer. When set, the agent
+  // uses the streaming LLM path for synthesize() calls. CLI callers enable
+  // this only in single-pass, non-JSON, TTY mode so tokens can land on
+  // stdout live.
+  onSynthesizeToken?: (chunk: string, round: number) => void;
 }
 
 export type AgentEvent =
@@ -193,7 +198,16 @@ export async function runAgent(
         sourceCount: keptSources.length,
         round,
       });
-      answer = await synthesize(question, keptSources, config.llm, signal);
+      const tokenSink = config.onSynthesizeToken
+        ? (chunk: string) => config.onSynthesizeToken!(chunk, round)
+        : undefined;
+      answer = await synthesize(
+        question,
+        keptSources,
+        config.llm,
+        signal,
+        tokenSink,
+      );
       emit(config, { type: "synthesize.done", round });
 
       const roundTrace: RoundTrace = {

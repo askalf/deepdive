@@ -18,6 +18,7 @@ export interface RuntimeConfig {
   cache: { enabled: boolean; dir: string; ttlMs: number };
   respectRobots: boolean;
   jsonOutput: boolean;
+  streamEnabled: boolean;
   verbose: boolean;
 }
 
@@ -39,6 +40,7 @@ export interface CLIFlags {
   cacheTtlMs?: number;
   ignoreRobots?: boolean;
   json?: boolean;
+  noStream?: boolean;
   verbose?: boolean;
 }
 
@@ -133,6 +135,13 @@ export function resolveConfig(
   const respectRobots =
     !(flags.ignoreRobots ?? env.DEEPDIVE_IGNORE_ROBOTS === "1");
   const jsonOutput = flags.json ?? env.DEEPDIVE_JSON === "1";
+  const streamOptOut = flags.noStream ?? env.DEEPDIVE_NO_STREAM === "1";
+  // Streaming is on by default but gets auto-disabled for:
+  //  - JSON output (we buffer into the JSON envelope)
+  //  - Deep mode (intermediate rounds would print multiple full drafts back-to-back)
+  //  - Explicit --no-stream
+  // CLI can further require stdout.isTTY before enabling.
+  const streamEnabled = !streamOptOut && !jsonOutput && deepRounds === 0;
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
 
   return {
@@ -158,6 +167,7 @@ export function resolveConfig(
     cache: { enabled: cacheEnabled, dir: cacheDir, ttlMs: cacheTtlMs },
     respectRobots,
     jsonOutput,
+    streamEnabled,
     verbose,
   };
 }
