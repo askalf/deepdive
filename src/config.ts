@@ -17,6 +17,7 @@ export interface RuntimeConfig {
   concurrency: number;
   cache: { enabled: boolean; dir: string; ttlMs: number };
   jsonOutput: boolean;
+  streamEnabled: boolean;
   verbose: boolean;
 }
 
@@ -37,6 +38,7 @@ export interface CLIFlags {
   noCache?: boolean;
   cacheTtlMs?: number;
   json?: boolean;
+  noStream?: boolean;
   verbose?: boolean;
 }
 
@@ -129,6 +131,13 @@ export function resolveConfig(
     DEFAULTS.cacheTtlMs;
 
   const jsonOutput = flags.json ?? env.DEEPDIVE_JSON === "1";
+  const streamOptOut = flags.noStream ?? env.DEEPDIVE_NO_STREAM === "1";
+  // Streaming is on by default but gets auto-disabled for:
+  //  - JSON output (we buffer into the JSON envelope)
+  //  - Deep mode (intermediate rounds would print multiple full drafts back-to-back)
+  //  - Explicit --no-stream
+  // CLI can further require stdout.isTTY before enabling.
+  const streamEnabled = !streamOptOut && !jsonOutput && deepRounds === 0;
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
 
   return {
@@ -153,6 +162,7 @@ export function resolveConfig(
     concurrency,
     cache: { enabled: cacheEnabled, dir: cacheDir, ttlMs: cacheTtlMs },
     jsonOutput,
+    streamEnabled,
     verbose,
   };
 }

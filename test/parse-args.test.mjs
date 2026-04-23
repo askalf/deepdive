@@ -115,3 +115,8 @@ test("parseArgs: --llm-attempts=5", () => {
   const p = parseArgs(["q", "--llm-attempts=5"]);
   assert.equal(p.flags.llmAttempts, 5);
 });
+
+test("parseArgs: --no-stream", () => {
+  const p = parseArgs(["q", "--no-stream"]);
+  assert.equal(p.flags.noStream, true);
+});

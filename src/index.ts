@@ -40,6 +40,7 @@ export {
   type LLMMessage,
   type LLMResult,
 } from "./llm.js";
+export { callLLMStream, parseBlocks, parseSSE, type StreamOptions } from "./llm-stream.js";
 export { retry, backoffDelay, type RetryOptions } from "./retry.js";
 export { resolveConfig, type RuntimeConfig, type CLIFlags } from "./config.js";
 export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";

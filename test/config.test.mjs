@@ -132,6 +132,22 @@ test("resolveConfig: llm.timeoutMs defaults to 120000, env + flag override", () 
   );
 });
 
+test("resolveConfig: streamEnabled — on by default, off for --json, --no-stream, or deep mode", () => {
+  // Default: on
+  assert.equal(resolveConfig({}, {}).streamEnabled, true);
+  // JSON off
+  assert.equal(resolveConfig({ json: true }, {}).streamEnabled, false);
+  // Deep off (any deepRounds > 0)
+  assert.equal(resolveConfig({ deepRounds: 2 }, {}).streamEnabled, false);
+  // --no-stream explicit off
+  assert.equal(resolveConfig({ noStream: true }, {}).streamEnabled, false);
+  // DEEPDIVE_NO_STREAM=1 off
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_NO_STREAM: "1" }).streamEnabled,
+    false,
+  );
+});
+
 test("resolveConfig: llm.maxAttempts defaults to 3, env + flag override", () => {
   assert.equal(resolveConfig({}, {}).llm.maxAttempts, 3);
   assert.equal(
