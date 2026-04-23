@@ -20,9 +20,15 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ matrix.node-version }}
+          cache: 'npm'
       - run: npm ci
         env:
+          # Skip the 100MB Chromium download — tests use a mock BrowserLike
+          # via AgentConfig.browserFactory, and the `--help` smoke doesn't
+          # launch a browser. Doctor's browser check would fail without it,
+          # but that's not exercised in CI.
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      - run: npm run typecheck
       - run: npm run build
       - run: npm test
       - run: node dist/cli.js --help

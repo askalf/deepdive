@@ -1,0 +1,40 @@
+name: actionlint
+
+# Validates GitHub Actions workflow YAML against actionlint's rule set.
+# Catches interpolation/quoting bugs, bad `needs:` refs, and the
+# untrusted-input-in-run-script class of injection risk that otherwise
+# only surfaces at workflow-fire time.
+
+on:
+  # Runs on every PR + every push to master, not just workflow changes.
+  # Path-filtered required checks can never report on PRs that don't
+  # touch the filter — leaves merges permanently blocked. 30s of CI on
+  # unrelated PRs is cheaper than that failure mode.
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Install actionlint v1.7.1
+        # Official release tarball, pinned to a specific version. CI-only
+        # lint tool; a broken build here won't ship to users, so a
+        # checksum pin isn't essential.
+        run: |
+          set -euo pipefail
+          curl -fsSL -o actionlint.tgz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.1/actionlint_1.7.1_linux_amd64.tar.gz
+          tar xzf actionlint.tgz actionlint
+          chmod +x actionlint
+          ./actionlint -version
+
+      - name: Run actionlint
+        run: ./actionlint -color
