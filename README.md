@@ -154,6 +154,46 @@ Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts
 
 ---
 
+## `deepdive doctor`
+
+One command, aggregated health report. Paste the output when filing issues.
+
+```bash
+$ deepdive doctor
+deepdive doctor — v0.3.0
+
+# environment
+  OK  Node        v22.21.1
+  --- Platform    win32 x64
+  --- deepdive    v0.3.0
+
+# cache
+  --- dir         ~/.deepdive/cache
+  OK  writable    yes
+  --- entries     42 files · 18.3 MB
+  --- oldest      3h ago
+
+# llm
+  --- base URL    http://localhost:3456
+  --- model       claude-sonnet-4-6
+  OK  reachable   200 in 142ms
+  OK  probe       max_tokens=1 · in=3 out=1
+
+# search
+  --- adapter     duckduckgo
+  OK  probe       4 results in 380ms
+
+# browser
+  OK  playwright  module loaded
+  OK  chromium    launch + close in 244ms
+
+Summary: 13 checks · 8 ok · 0 warn · 0 fail
+```
+
+Exit code is 1 if anything's broken, 0 otherwise. `--json` for structured output.
+
+---
+
 ## Caching
 
 Every successful fetch goes to `~/.deepdive/cache/<sha256>.json` with a 1-hour TTL. A re-run of the same question — or a follow-up run that re-fetches overlapping URLs — never re-opens Chromium for sources it already has. Iteration during question refinement is free.
