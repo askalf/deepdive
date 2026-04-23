@@ -36,3 +36,18 @@ export { resolveConfig, type RuntimeConfig, type CLIFlags } from "./config.js";
 export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";
 export { runConcurrent } from "./concurrency.js";
 export { trimTrailingSlashes, stripHashFragment, dedupeKey } from "./url-util.js";
+export {
+  runDoctor,
+  renderDoctorText,
+  renderDoctorJson,
+  exitCodeFor,
+  scrubPath,
+  formatBytes,
+  formatDuration,
+  classifyFetchError,
+  nodeMeetsMinimum,
+  type CheckResult,
+  type CheckStatus,
+  type DoctorReport,
+  type DoctorOptions,
+} from "./doctor.js";

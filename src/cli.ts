@@ -16,11 +16,19 @@ import { resolveConfig, type CLIFlags } from "./config.js";
 import { resolveSearchAdapter } from "./search.js";
 import { runAgent, type AgentEvent } from "./agent.js";
 import { createCache } from "./cache.js";
+import {
+  runDoctor,
+  renderDoctorText,
+  renderDoctorJson,
+  exitCodeFor,
+} from "./doctor.js";
 
 const USAGE = `deepdive — local research agent
 
 Usage:
-  deepdive "<question>" [flags]
+  deepdive "<question>" [flags]      Run the research agent
+  deepdive doctor [flags]            Health check — paste the output when filing issues
+  deepdive --help                    Show this help
 
 Flags:
   --base-url=<url>              LLM endpoint. Default: http://localhost:3456 (dario)
@@ -209,6 +217,16 @@ async function main(argv: string[]): Promise<number> {
   if (parsed.help) {
     process.stdout.write(USAGE);
     return 0;
+  }
+  if (parsed.question === "doctor") {
+    const config = resolveConfig(parsed.flags, process.env);
+    const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+    const report = await runDoctor({ config, env: process.env });
+    const out = config.jsonOutput
+      ? renderDoctorJson(report)
+      : renderDoctorText(report, { color: useColor }) + "\n";
+    process.stdout.write(out);
+    return exitCodeFor(report);
   }
   if (!parsed.question) {
     process.stderr.write(`deepdive: missing question.\n\n${USAGE}`);
