@@ -96,6 +96,11 @@ test("parseArgs: --no-cache flag", () => {
   assert.equal(p.flags.noCache, true);
 });
 
+test("parseArgs: --ignore-robots flag", () => {
+  const p = parseArgs(["q", "--ignore-robots"]);
+  assert.equal(p.flags.ignoreRobots, true);
+});
+
 test("parseArgs: --json flag", () => {
   const p = parseArgs(["q", "--json"]);
   assert.equal(p.flags.json, true);

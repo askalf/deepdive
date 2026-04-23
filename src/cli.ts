@@ -52,6 +52,7 @@ Flags:
   --concurrency=<n>             Parallel fetches. Default: 4
   --no-cache                    Disable the on-disk page cache (default: enabled)
   --cache-ttl-ms=<ms>           Page cache TTL. Default: 3600000 (1 hour)
+  --ignore-robots               Bypass robots.txt checks (default: respect them)
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
   --verbose, -v                 Stream progress events to stderr
@@ -94,6 +95,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--no-cache") {
       flags.noCache = true;
+      continue;
+    }
+    if (a === "--ignore-robots") {
+      flags.ignoreRobots = true;
       continue;
     }
     if (a === "--json") {
@@ -208,6 +213,8 @@ function renderEvent(e: AgentEvent): string {
       return `  fetch   ${e.cached ? "(cached) " : ""}${e.url}`;
     case "fetch.done":
       return `          ${e.ok ? "OK " : "!! "}${e.status} · ${e.words} words${e.cached ? " · cache" : ""}`;
+    case "fetch.skipped":
+      return `  fetch   skipped (${e.reason}) ${e.url}`;
     case "synthesize.start":
       return `  synth   round ${e.round} · ${e.sourceCount} source${e.sourceCount === 1 ? "" : "s"}`;
     case "synthesize.done":
@@ -303,6 +310,7 @@ async function main(argv: string[]): Promise<number> {
         deepRounds: config.deepRounds,
         concurrency: config.concurrency,
         cache,
+        respectRobots: config.respectRobots,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
         },

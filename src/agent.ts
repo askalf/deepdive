@@ -18,6 +18,11 @@ import { buildSourceTable, renderAnswerMarkdown, type Source } from "./citations
 import { synthesize, type SourceWithContent } from "./synthesize.js";
 import type { PageCache } from "./cache.js";
 import { runConcurrent } from "./concurrency.js";
+import {
+  canFetch,
+  DEFAULT_USER_AGENT,
+  type RobotsCache,
+} from "./robots.js";
 
 // Minimal surface the agent needs from a browser. BrowserSession satisfies it;
 // tests pass a mock with the same shape.
@@ -38,6 +43,12 @@ export interface AgentConfig {
   concurrency: number;
   cache?: PageCache;
   browserFactory?: (opts: BrowserOptions) => BrowserLike;
+  // Respect robots.txt when true (default). Network errors fetching robots
+  // return "unknown" and we err on the side of fetching. --ignore-robots in
+  // the CLI flips this to false.
+  respectRobots?: boolean;
+  robotsUserAgent?: string;
+  robotsCache?: RobotsCache;
   onEvent?: (event: AgentEvent) => void;
   // Fires for each SSE token emitted by the synthesizer. When set, the agent
   // uses the streaming LLM path for synthesize() calls. CLI callers enable
@@ -61,6 +72,7 @@ export type AgentEvent =
       words: number;
       cached: boolean;
     }
+  | { type: "fetch.skipped"; url: string; reason: "robots" }
   | { type: "synthesize.start"; sourceCount: number; round: number }
   | { type: "synthesize.done"; round: number }
   | { type: "critique.start"; round: number }
@@ -284,6 +296,17 @@ async function fetchOne(
   config: AgentConfig,
   ensureBrowser: () => Promise<BrowserLike>,
 ): Promise<FetchOutcome | null> {
+  if (config.respectRobots !== false) {
+    const ua = config.robotsUserAgent ?? DEFAULT_USER_AGENT;
+    const result = await canFetch(c.url, {
+      userAgent: ua,
+      cache: config.robotsCache,
+    });
+    if (result === "deny") {
+      emit(config, { type: "fetch.skipped", url: c.url, reason: "robots" });
+      return null;
+    }
+  }
   if (config.cache) {
     const cached = await config.cache.get(c.url);
     if (cached) {
