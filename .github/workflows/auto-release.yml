@@ -3,14 +3,20 @@ name: Auto release on version bump
 # Fires on merge of ANY PR to master. Exits early unless package.json's
 # `version` field differs from the parent commit's — so PRs that don't
 # touch version are cheap no-ops (~10s). When the version did change,
-# creates the matching `vX.Y.Z` tag + GitHub release from the CHANGELOG
-# section for that version. publish.yml then fires on `release:published`
-# and runs `npm publish --access public --provenance`.
+# creates the matching `vX.Y.Z` tag + GitHub release AND publishes to
+# npm inline — both steps in the same job.
 #
-# Closes the class of bug where a maintainer bumps version in package.json,
-# promotes CHANGELOG Unreleased → dated heading, merges, and then forgets
-# to `gh release create`. Left dario's npm at v3.31.7 while master was at
-# v3.31.11 — 4 versions un-shipped. Ported to deepdive preemptively.
+# Why inline-publish rather than relying on publish.yml's `release:
+# published` trigger: GitHub intentionally doesn't fire other workflows
+# for events created by GITHUB_TOKEN (loop protection). So
+# `gh release create` here would create the release but NOT kick
+# publish.yml — which cost us a manual delete+recreate on v0.3.0 before
+# this was fixed. Inlining means the chain is:
+#   PR merge → this workflow → tag+release+npm publish in one run.
+#
+# publish.yml stays in place for the *manual* release case (a maintainer
+# running `gh release create` locally does trigger publish.yml, since
+# that release event isn't from GITHUB_TOKEN).
 
 on:
   pull_request:
@@ -19,6 +25,9 @@ on:
 
 permissions:
   contents: write
+  # id-token: write required for `npm publish --provenance` (SLSA
+  # attestation). Without this, npm publish would fail or skip provenance.
+  id-token: write
 
 jobs:
   release:
@@ -69,6 +78,42 @@ jobs:
             exit 1
           fi
 
+      # ─── Build + test pipeline (mirrors publish.yml) ──────────────
+      # We do this BEFORE cutting the GitHub release, so a failing
+      # build/test aborts everything — no release, no npm publish, no
+      # half-shipped state. Node 22 matches publish.yml's choice.
+
+      - name: Set up Node
+        if: steps.ver.outputs.changed == 'true'
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: npm ci
+        if: steps.ver.outputs.changed == 'true'
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm ci
+
+      - name: typecheck
+        if: steps.ver.outputs.changed == 'true'
+        run: npm run typecheck
+
+      - name: build
+        if: steps.ver.outputs.changed == 'true'
+        run: npm run build
+
+      - name: test
+        if: steps.ver.outputs.changed == 'true'
+        run: npm test
+
+      - name: --help smoke
+        if: steps.ver.outputs.changed == 'true'
+        run: node dist/cli.js --help
+
+      # ─── Release + publish ────────────────────────────────────────
+
       - name: Extract release notes from CHANGELOG
         if: steps.ver.outputs.changed == 'true'
         # Pulls the section for this version from CHANGELOG.md so the
@@ -101,14 +146,20 @@ jobs:
             echo ""
             echo "---"
             echo ""
-            echo "Triggered by auto-release workflow on merge of a PR that bumped \`package.json\` version. Publishing to npm handled by \`publish.yml\` on this release's \`published\` event."
+            echo "Built + tested + npm-published inline by \`auto-release.yml\` on this run. See the workflow log for the provenance-attested publish output."
           } > body.md
 
           gh release create "$TAG" --title "$TAG" --notes-file body.md
+
+      - name: npm publish
+        if: steps.ver.outputs.changed == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
 
       - name: Post-release summary
         if: steps.ver.outputs.changed == 'true'
         run: |
           echo "✓ Released v${{ steps.ver.outputs.version }}"
           echo "✓ Triggered by PR #${{ github.event.pull_request.number }}"
-          echo "→ publish.yml will pick this up and publish to npm"
+          echo "✓ Published to npm (with SLSA provenance)"

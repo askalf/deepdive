@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### CI — auto-release workflow now publishes to npm inline
+
+v0.3.0 surfaced a latent chain-break: the newly-ported `auto-release.yml` created the GitHub release via `GITHUB_TOKEN`, but **GitHub intentionally doesn't fire workflows for events created by `GITHUB_TOKEN`** (loop protection). So `publish.yml`'s `release:published` trigger never fired, and v0.3.0 needed a manual delete+recreate of the release (from a human token) to kick publish. Same latent bug ported cleanly from dario — the chain worked there only because every dario release so far had been a manual `gh release create` from the maintainer, which *does* fire downstream workflows.
+
+Fix: inline the build + test + publish steps into `auto-release.yml` itself. Net chain is now:
+
+- PR merge → `auto-release.yml` single run → build + typecheck + test + `--help` smoke → `gh release create` → `npm publish --access public --provenance`.
+
+`publish.yml` stays in place for the *manual* release case: a maintainer running `gh release create` locally still fires `publish.yml` via the release-published event (that release isn't from `GITHUB_TOKEN`, so it does trigger workflows).
+
+Added `id-token: write` permission to `auto-release.yml` for the SLSA provenance attestation. No runtime-behavior change for users; next PR that bumps `package.json.version` will exercise the fixed chain end-to-end.
+
 ## [0.3.0] - 2026-04-23
 
 Streaming synthesis, `deepdive doctor`, LLM retry + per-call timeout, robots.txt respect, CI foundation parity with dario / claude-bridge, auto-release workflow preemptively ported, CodeQL pass, home-dir scrubbing on error output.
