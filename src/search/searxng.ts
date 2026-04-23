@@ -2,13 +2,14 @@
 // public). Requires DEEPDIVE_SEARXNG_URL. Uses the JSON output format.
 
 import type { SearchAdapter, SearchResult } from "../search.js";
+import { trimTrailingSlashes } from "../url-util.js";
 
 export class SearXNGSearch implements SearchAdapter {
   readonly name = "searxng";
   constructor(private readonly baseUrl: string) {}
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
-    const url = new URL(this.baseUrl.replace(/\/+$/, "") + "/search");
+    const url = new URL(trimTrailingSlashes(this.baseUrl) + "/search");
     url.searchParams.set("q", query);
     url.searchParams.set("format", "json");
     const res = await fetch(url, {

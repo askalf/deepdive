@@ -2,6 +2,8 @@
 // Default target is dario at http://localhost:3456, but any Anthropic-compat
 // endpoint works. The only header dario cares about is Authorization / x-api-key.
 
+import { trimTrailingSlashes } from "./url-util.js";
+
 export interface LLMConfig {
   baseUrl: string;
   apiKey: string;
@@ -25,7 +27,7 @@ export async function callLLM(
   config: LLMConfig,
   signal?: AbortSignal,
 ): Promise<LLMResult> {
-  const url = `${config.baseUrl.replace(/\/+$/, "")}/v1/messages`;
+  const url = `${trimTrailingSlashes(config.baseUrl)}/v1/messages`;
   const body = {
     model: config.model,
     max_tokens: config.maxTokens,
