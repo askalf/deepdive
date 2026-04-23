@@ -21,6 +21,7 @@ import {
   renderDoctorText,
   renderDoctorJson,
   exitCodeFor,
+  scrubPath,
 } from "./doctor.js";
 
 const USAGE = `deepdive — local research agent
@@ -216,12 +217,21 @@ function ellipsize(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
+// Exported for unit tests. User-facing error rendering at the CLI boundary.
+// Runs the error message through scrubPath so the user's home directory can
+// never end up in a bug report.
+export function safeErrorMessage(err: unknown): string {
+  const raw =
+    err instanceof Error ? err.message : String(err ?? "unknown error");
+  return scrubPath(raw);
+}
+
 async function main(argv: string[]): Promise<number> {
   let parsed: ParsedArgs;
   try {
     parsed = parseArgs(argv);
   } catch (err) {
-    process.stderr.write(`deepdive: ${(err as Error).message}\n\n${USAGE}`);
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n\n${USAGE}`);
     return 2;
   }
   if (parsed.help) {
@@ -303,7 +313,7 @@ async function main(argv: string[]): Promise<number> {
     }
     return 0;
   } catch (err) {
-    process.stderr.write(`deepdive: ${(err as Error).message}\n`);
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
     return 1;
   } finally {
     process.off("SIGINT", sigint);
