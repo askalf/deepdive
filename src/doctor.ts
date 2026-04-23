@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import type { RuntimeConfig } from "./config.js";
 import type { SearchAdapter } from "./search.js";
 import { resolveSearchAdapter } from "./search.js";
+import { trimTrailingSlashes } from "./url-util.js";
 
 export type CheckStatus = "ok" | "warn" | "fail" | "info";
 
@@ -174,7 +175,10 @@ async function llmChecks(opts: DoctorOptions): Promise<CheckResult[]> {
     detail: model,
   });
 
-  const url = `${baseUrl.replace(/\/+$/, "")}/v1/messages`;
+  // Non-regex trim to avoid CodeQL's polynomial-ReDoS detection on
+  // `/\/+$/`. The regex is actually safe (no nested repetition) but
+  // `trimTrailingSlashes` is our standard helper used everywhere else.
+  const url = `${trimTrailingSlashes(baseUrl)}/v1/messages`;
   const body = {
     model,
     max_tokens: 1,
