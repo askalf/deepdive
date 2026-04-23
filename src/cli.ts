@@ -16,6 +16,7 @@ import { resolveConfig, type CLIFlags } from "./config.js";
 import { resolveSearchAdapter } from "./search.js";
 import { runAgent, type AgentEvent } from "./agent.js";
 import { createCache } from "./cache.js";
+import { renderSourcesMarkdown } from "./citations.js";
 import {
   runDoctor,
   renderDoctorText,
@@ -54,6 +55,9 @@ Flags:
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
   --verbose, -v                 Stream progress events to stderr
+  --no-stream                   Buffer the final answer instead of streaming
+                                tokens to stdout (auto-off for --json, deep
+                                mode, and non-TTY stdout)
   --help, -h                    Show this help
 
 Environment:
@@ -94,6 +98,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--json") {
       flags.json = true;
+      continue;
+    }
+    if (a === "--no-stream") {
+      flags.noStream = true;
       continue;
     }
     if (a === "--deep") {
@@ -226,6 +234,12 @@ export function safeErrorMessage(err: unknown): string {
   return scrubPath(raw);
 }
 
+// Matches the escaping used by renderAnswerMarkdown for the H1 heading — keep
+// the streaming header identical to the buffered one so users can diff them.
+function escapeHeader(s: string): string {
+  return s.replace(/[\r\n]+/g, " ").replace(/\[/g, "(").replace(/\]/g, ")");
+}
+
 async function main(argv: string[]): Promise<number> {
   let parsed: ParsedArgs;
   try {
@@ -264,7 +278,19 @@ async function main(argv: string[]): Promise<number> {
   process.on("SIGINT", sigint);
   process.on("SIGTERM", sigint);
 
+  // Live-streaming requires an attached TTY: escape sequences, partial line
+  // writes, and interactive buffering behave weirdly when stdout is a pipe.
+  // Env-var-only: tests can set FORCE_TTY=1 to exercise the streaming path
+  // without a real terminal.
+  const streaming =
+    config.streamEnabled &&
+    (process.stdout.isTTY || process.env.DEEPDIVE_FORCE_STREAM === "1");
+  let streamed = false;
+
   try {
+    if (streaming) {
+      process.stdout.write(`# ${escapeHeader(parsed.question)}\n\n`);
+    }
     const result = await runAgent(
       parsed.question,
       {
@@ -280,9 +306,30 @@ async function main(argv: string[]): Promise<number> {
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
         },
+        onSynthesizeToken: streaming
+          ? (chunk) => {
+              streamed = true;
+              process.stdout.write(chunk);
+            }
+          : undefined,
       },
       ac.signal,
     );
+
+    if (streaming && streamed) {
+      // Streaming mode already wrote the header + answer tokens. Close with
+      // the sources block and (if requested) write the full markdown to the
+      // output file too.
+      const tail = "\n\n" + renderSourcesMarkdown(result.sources);
+      process.stdout.write(tail);
+      if (!tail.endsWith("\n")) process.stdout.write("\n");
+      if (parsed.outPath) {
+        const path = resolve(parsed.outPath);
+        writeFileSync(path, result.markdown, "utf-8");
+        process.stderr.write(`\nwrote ${path}\n`);
+      }
+      return 0;
+    }
 
     const output = config.jsonOutput
       ? JSON.stringify(

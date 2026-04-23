@@ -1,8 +1,12 @@
 // Final answer synthesis — takes the original question and the collected
 // sources, asks the LLM to produce a cited markdown answer. Sources are
 // passed as a numbered list so the model can cite them inline as [1], [2].
+//
+// When `onToken` is provided, uses the streaming variant so tokens land in
+// front of the user as the model writes them instead of after a 30+s wait.
 
 import { callLLM, type LLMConfig } from "./llm.js";
+import { callLLMStream } from "./llm-stream.js";
 import type { Source } from "./citations.js";
 
 export interface SourceWithContent extends Source {
@@ -30,6 +34,7 @@ export async function synthesize(
   sources: SourceWithContent[],
   config: LLMConfig,
   signal?: AbortSignal,
+  onToken?: (text: string) => void,
 ): Promise<string> {
   if (sources.length === 0) {
     return "_No sources could be fetched or extracted. Unable to answer._";
@@ -39,12 +44,18 @@ export async function synthesize(
     `Question: ${question}\n\n` +
     `Sources (${sources.length}):\n\n${packet}\n\n` +
     `Write the cited markdown answer now.`;
-  const { text } = await callLLM(
-    [{ role: "user", content: userMessage }],
-    SYNTH_SYSTEM,
-    config,
-    signal,
-  );
+  const messages = [{ role: "user" as const, content: userMessage }];
+  if (onToken) {
+    const { text } = await callLLMStream(
+      messages,
+      SYNTH_SYSTEM,
+      config,
+      { onToken },
+      signal,
+    );
+    return text;
+  }
+  const { text } = await callLLM(messages, SYNTH_SYSTEM, config, signal);
   return text;
 }
 
