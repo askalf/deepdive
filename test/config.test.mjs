@@ -119,3 +119,24 @@ test("resolveConfig: --json flag and DEEPDIVE_JSON=1 both set jsonOutput", () =>
   assert.equal(resolveConfig({ json: true }, {}).jsonOutput, true);
   assert.equal(resolveConfig({}, { DEEPDIVE_JSON: "1" }).jsonOutput, true);
 });
+
+test("resolveConfig: llm.timeoutMs defaults to 120000, env + flag override", () => {
+  assert.equal(resolveConfig({}, {}).llm.timeoutMs, 120_000);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_LLM_TIMEOUT_MS: "60000" }).llm.timeoutMs,
+    60_000,
+  );
+  assert.equal(
+    resolveConfig({ llmTimeoutMs: 1000 }, { DEEPDIVE_LLM_TIMEOUT_MS: "9999" }).llm.timeoutMs,
+    1000,
+  );
+});
+
+test("resolveConfig: llm.maxAttempts defaults to 3, env + flag override", () => {
+  assert.equal(resolveConfig({}, {}).llm.maxAttempts, 3);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_LLM_ATTEMPTS: "5" }).llm.maxAttempts,
+    5,
+  );
+  assert.equal(resolveConfig({ llmAttempts: 1 }, {}).llm.maxAttempts, 1);
+});

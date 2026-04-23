@@ -40,7 +40,10 @@ Flags:
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
-  --timeout-ms=<ms>             Per-fetch timeout. Default: 30000
+  --timeout-ms=<ms>             Per-fetch (browser) timeout. Default: 30000
+  --llm-timeout-ms=<ms>         Per-LLM-call timeout. Default: 120000 (2 min)
+  --llm-attempts=<n>            Max LLM attempts per call (with exponential
+                                backoff on 5xx/429/network errors). Default: 3
   --deep[=<n>]                  Iterative research: run N additional critic-driven
                                 rounds after the first synthesis. Default when
                                 bare: 2. No deep pass when flag absent.
@@ -57,7 +60,8 @@ Environment:
   DEEPDIVE_SEARXNG_URL, DEEPDIVE_BRAVE_KEY, DEEPDIVE_TAVILY_KEY,
   DEEPDIVE_MAX_SOURCES, DEEPDIVE_FETCH_TIMEOUT_MS, DEEPDIVE_HEADED,
   DEEPDIVE_DEEP_ROUNDS, DEEPDIVE_CONCURRENCY, DEEPDIVE_NO_CACHE,
-  DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE
+  DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE,
+  DEEPDIVE_LLM_TIMEOUT_MS, DEEPDIVE_LLM_ATTEMPTS
 `;
 
 interface ParsedArgs {
@@ -126,6 +130,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "timeout-ms":
           flags.timeoutMs = parsePositiveInt(value);
+          break;
+        case "llm-timeout-ms":
+          flags.llmTimeoutMs = parsePositiveInt(value);
+          break;
+        case "llm-attempts":
+          flags.llmAttempts = parsePositiveInt(value);
           break;
         case "deep":
           flags.deepRounds = parseNonNegativeInt(value);

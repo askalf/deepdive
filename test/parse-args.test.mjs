@@ -105,3 +105,13 @@ test("parseArgs: --cache-ttl-ms=300000", () => {
   const p = parseArgs(["q", "--cache-ttl-ms=300000"]);
   assert.equal(p.flags.cacheTtlMs, 300000);
 });
+
+test("parseArgs: --llm-timeout-ms=60000", () => {
+  const p = parseArgs(["q", "--llm-timeout-ms=60000"]);
+  assert.equal(p.flags.llmTimeoutMs, 60_000);
+});
+
+test("parseArgs: --llm-attempts=5", () => {
+  const p = parseArgs(["q", "--llm-attempts=5"]);
+  assert.equal(p.flags.llmAttempts, 5);
+});
