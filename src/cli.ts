@@ -3,10 +3,11 @@
 //
 //   deepdive "how does claude's rate limiter work"
 //   deepdive "..." --model=claude-opus-4-7 --search=brave --out=report.md
+//   deepdive "..." --deep=2 --concurrency=6 --json
 //   deepdive --help
 //
-// Prints the cited markdown report to stdout. Progress events go to stderr
-// when --verbose is set or DEEPDIVE_VERBOSE=1.
+// Prints the cited markdown report to stdout (or JSON with --json). Progress
+// events go to stderr when --verbose is set or DEEPDIVE_VERBOSE=1.
 
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -14,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { resolveConfig, type CLIFlags } from "./config.js";
 import { resolveSearchAdapter } from "./search.js";
 import { runAgent, type AgentEvent } from "./agent.js";
+import { createCache } from "./cache.js";
 
 const USAGE = `deepdive — local research agent
 
@@ -31,7 +33,14 @@ Flags:
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
   --timeout-ms=<ms>             Per-fetch timeout. Default: 30000
-  --out=<path>                  Write markdown to a file (also prints to stdout)
+  --deep[=<n>]                  Iterative research: run N additional critic-driven
+                                rounds after the first synthesis. Default when
+                                bare: 2. No deep pass when flag absent.
+  --concurrency=<n>             Parallel fetches. Default: 4
+  --no-cache                    Disable the on-disk page cache (default: enabled)
+  --cache-ttl-ms=<ms>           Page cache TTL. Default: 3600000 (1 hour)
+  --json                        Emit a JSON result to stdout instead of markdown
+  --out=<path>                  Write the output (markdown or json) to a file too
   --verbose, -v                 Stream progress events to stderr
   --help, -h                    Show this help
 
@@ -39,7 +48,8 @@ Environment:
   DEEPDIVE_BASE_URL, DEEPDIVE_API_KEY, DEEPDIVE_MODEL, DEEPDIVE_SEARCH,
   DEEPDIVE_SEARXNG_URL, DEEPDIVE_BRAVE_KEY, DEEPDIVE_TAVILY_KEY,
   DEEPDIVE_MAX_SOURCES, DEEPDIVE_FETCH_TIMEOUT_MS, DEEPDIVE_HEADED,
-  DEEPDIVE_VERBOSE
+  DEEPDIVE_DEEP_ROUNDS, DEEPDIVE_CONCURRENCY, DEEPDIVE_NO_CACHE,
+  DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE
 `;
 
 interface ParsedArgs {
@@ -63,6 +73,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--verbose" || a === "-v") {
       flags.verbose = true;
+      continue;
+    }
+    if (a === "--no-cache") {
+      flags.noCache = true;
+      continue;
+    }
+    if (a === "--json") {
+      flags.json = true;
+      continue;
+    }
+    if (a === "--deep") {
+      flags.deepRounds = 2;
       continue;
     }
     const m = /^--([a-z0-9-]+)=(.*)$/.exec(a);
@@ -97,6 +119,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "timeout-ms":
           flags.timeoutMs = parsePositiveInt(value);
           break;
+        case "deep":
+          flags.deepRounds = parseNonNegativeInt(value);
+          break;
+        case "concurrency":
+          flags.concurrency = parsePositiveInt(value);
+          break;
+        case "cache-ttl-ms":
+          flags.cacheTtlMs = parsePositiveInt(value);
+          break;
         case "out":
           outPath = value;
           break;
@@ -128,24 +159,38 @@ function parsePositiveInt(s: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+function parseNonNegativeInt(s: string): number | undefined {
+  if (!/^\d+$/.test(s)) return undefined;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 function renderEvent(e: AgentEvent): string {
   switch (e.type) {
     case "plan.start":
       return `  plan    planning sub-queries for: ${ellipsize(e.question, 60)}`;
     case "plan.done":
       return `  plan    ${e.plan.queries.length} sub-queries`;
+    case "round.start":
+      return `  round   ${e.round === 0 ? "initial" : "deep " + e.round} · ${e.queries.length} quer${e.queries.length === 1 ? "y" : "ies"}`;
     case "search.start":
       return `  search  ${e.query}`;
     case "search.done":
       return `          ${e.count} result${e.count === 1 ? "" : "s"}`;
     case "fetch.start":
-      return `  fetch   ${e.url}`;
+      return `  fetch   ${e.cached ? "(cached) " : ""}${e.url}`;
     case "fetch.done":
-      return `          ${e.ok ? "OK " : "!! "}${e.status} · ${e.words} words`;
+      return `          ${e.ok ? "OK " : "!! "}${e.status} · ${e.words} words${e.cached ? " · cache" : ""}`;
     case "synthesize.start":
-      return `  synth   synthesizing from ${e.sourceCount} source${e.sourceCount === 1 ? "" : "s"}`;
+      return `  synth   round ${e.round} · ${e.sourceCount} source${e.sourceCount === 1 ? "" : "s"}`;
     case "synthesize.done":
-      return `  synth   done`;
+      return `  synth   round ${e.round} done`;
+    case "critique.start":
+      return `  critic  reviewing round ${e.round}`;
+    case "critique.done":
+      return e.critique.done
+        ? `  critic  answer complete (${e.critique.reasoning || "no reasoning given"})`
+        : `  critic  ${e.critique.queries.length} follow-up quer${e.critique.queries.length === 1 ? "y" : "ies"}`;
   }
 }
 
@@ -172,6 +217,9 @@ async function main(argv: string[]): Promise<number> {
 
   const config = resolveConfig(parsed.flags, process.env);
   const search = await resolveSearchAdapter(config.searchAdapter, process.env);
+  const cache = config.cache.enabled
+    ? createCache({ dir: config.cache.dir, ttlMs: config.cache.ttlMs })
+    : undefined;
 
   const ac = new AbortController();
   const sigint = () => ac.abort();
@@ -188,6 +236,9 @@ async function main(argv: string[]): Promise<number> {
         resultsPerQuery: config.resultsPerQuery,
         maxSources: config.maxSources,
         maxWordsPerSource: config.maxWordsPerSource,
+        deepRounds: config.deepRounds,
+        concurrency: config.concurrency,
+        cache,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
         },
@@ -195,12 +246,31 @@ async function main(argv: string[]): Promise<number> {
       ac.signal,
     );
 
-    process.stdout.write(result.markdown);
-    if (!result.markdown.endsWith("\n")) process.stdout.write("\n");
+    const output = config.jsonOutput
+      ? JSON.stringify(
+          {
+            question: result.question,
+            plan: result.plan,
+            rounds: result.rounds,
+            sources: result.sources.map((s) => ({
+              id: s.id,
+              url: s.url,
+              title: s.title,
+              fetchedAt: s.fetchedAt,
+            })),
+            answer: result.answer,
+            usage: result.usage,
+          },
+          null,
+          2,
+        ) + "\n"
+      : result.markdown + (result.markdown.endsWith("\n") ? "" : "\n");
+
+    process.stdout.write(output);
 
     if (parsed.outPath) {
       const path = resolve(parsed.outPath);
-      writeFileSync(path, result.markdown, "utf-8");
+      writeFileSync(path, output, "utf-8");
       process.stderr.write(`\nwrote ${path}\n`);
     }
     return 0;

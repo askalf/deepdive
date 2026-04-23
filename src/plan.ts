@@ -1,11 +1,21 @@
 // Query planning — decompose a user question into 3–5 sub-queries suitable
 // for web search. Pure over its inputs; wraps one LLM call.
+//
+// Also exports critique() for iterative deep research: given a draft answer
+// and the queries already tried, the critic proposes 0–3 follow-up queries
+// that would fill the gaps — or declares the answer done.
 
 import { callLLM, type LLMConfig } from "./llm.js";
 
 export interface Plan {
   queries: string[];
   reasoning: string;
+}
+
+export interface Critique {
+  done: boolean;
+  reasoning: string;
+  queries: string[];
 }
 
 const PLANNER_SYSTEM = `You are a research planner. Given a user's question, produce 3-5 specific, searchable sub-queries that together will gather the evidence needed to answer it well.
@@ -50,6 +60,72 @@ export function parsePlan(raw: string): Plan {
   return {
     queries,
     reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
+  };
+}
+
+const CRITIC_SYSTEM = `You are a research critic reviewing a draft answer to a user's question.
+
+You will receive:
+1. The original question.
+2. The current draft answer with inline [N] citations.
+3. The list of search queries already run.
+
+Your job: identify the most important gaps in the draft answer — aspects of the question not answered, answered weakly, or answered with insufficient sourcing — and propose 0 to 3 additional search queries that would fill those gaps in the next round.
+
+Rules:
+- If the draft answer is already complete and well-sourced, set "done": true and return no queries.
+- Do not repeat queries similar to ones already searched. The list of prior queries is provided.
+- Queries must be concrete, search-engine-shaped phrases a user would type.
+- Prefer queries targeting specific unanswered facts over generic re-searches.
+- Keep the number of new queries minimal — fewer, sharper queries beat more, vaguer ones.
+
+Output FORMAT (strict): one JSON object, no prose before or after, matching:
+{"done": bool, "reasoning": "<1-2 sentences>", "queries": ["q1", "q2", ...]}`;
+
+export async function critique(
+  question: string,
+  draftAnswer: string,
+  priorQueries: string[],
+  config: LLMConfig,
+  signal?: AbortSignal,
+): Promise<Critique> {
+  const userMessage =
+    `Question: ${question}\n\n` +
+    `Draft answer:\n${draftAnswer}\n\n` +
+    `Queries already run (${priorQueries.length}):\n` +
+    priorQueries.map((q) => `- ${q}`).join("\n") +
+    `\n\nReview the draft and propose follow-up queries if needed.`;
+  const { text } = await callLLM(
+    [{ role: "user", content: userMessage }],
+    CRITIC_SYSTEM,
+    config,
+    signal,
+  );
+  return parseCritique(text);
+}
+
+// Exported for unit tests.
+export function parseCritique(raw: string): Critique {
+  const json = extractFirstJsonObject(raw);
+  if (!json) throw new Error(`critic did not return JSON: ${raw.slice(0, 200)}`);
+  const parsed = JSON.parse(json) as {
+    done?: unknown;
+    reasoning?: unknown;
+    queries?: unknown;
+  };
+  const queries = Array.isArray(parsed.queries)
+    ? parsed.queries
+        .filter((q): q is string => typeof q === "string")
+        .map((q) => q.trim())
+        .filter((q) => q.length > 0)
+        .slice(0, 3)
+    : [];
+  const done =
+    typeof parsed.done === "boolean" ? parsed.done : queries.length === 0;
+  return {
+    done,
+    reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
+    queries,
   };
 }
 
