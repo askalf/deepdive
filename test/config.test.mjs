@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveConfig, parsePositiveInt } from "../dist/config.js";
+import { resolveConfig, parsePositiveInt, parseNonNegativeInt } from "../dist/config.js";
 
 test("resolveConfig: defaults map to dario at localhost:3456", () => {
   const c = resolveConfig({}, {});
@@ -56,4 +56,66 @@ test("parsePositiveInt: accepts positive ints with surrounding whitespace", () =
   assert.equal(parsePositiveInt("  42  "), 42);
   assert.equal(parsePositiveInt("1"), 1);
   assert.equal(parsePositiveInt("1000000"), 1000000);
+});
+
+test("parseNonNegativeInt: accepts 0 where parsePositiveInt wouldn't", () => {
+  assert.equal(parseNonNegativeInt("0"), 0);
+  assert.equal(parseNonNegativeInt("5"), 5);
+  assert.equal(parseNonNegativeInt("-1"), undefined);
+  assert.equal(parseNonNegativeInt("abc"), undefined);
+  assert.equal(parseNonNegativeInt(undefined), undefined);
+});
+
+test("resolveConfig: deepRounds defaults to 0, env sets, flag wins", () => {
+  assert.equal(resolveConfig({}, {}).deepRounds, 0);
+  assert.equal(resolveConfig({}, { DEEPDIVE_DEEP_ROUNDS: "3" }).deepRounds, 3);
+  assert.equal(
+    resolveConfig({ deepRounds: 5 }, { DEEPDIVE_DEEP_ROUNDS: "3" }).deepRounds,
+    5,
+  );
+  // deepRounds=0 is valid (user explicitly disables)
+  assert.equal(resolveConfig({ deepRounds: 0 }, {}).deepRounds, 0);
+});
+
+test("resolveConfig: concurrency defaults to 4", () => {
+  assert.equal(resolveConfig({}, {}).concurrency, 4);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_CONCURRENCY: "8" }).concurrency,
+    8,
+  );
+  assert.equal(resolveConfig({ concurrency: 2 }, {}).concurrency, 2);
+});
+
+test("resolveConfig: cache enabled by default, --no-cache flag disables", () => {
+  assert.equal(resolveConfig({}, {}).cache.enabled, true);
+  assert.equal(resolveConfig({ noCache: true }, {}).cache.enabled, false);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_NO_CACHE: "1" }).cache.enabled,
+    false,
+  );
+});
+
+test("resolveConfig: cache ttl default 1h, env/flag override", () => {
+  const defaultTtl = 60 * 60 * 1000;
+  assert.equal(resolveConfig({}, {}).cache.ttlMs, defaultTtl);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_CACHE_TTL_MS: "60000" }).cache.ttlMs,
+    60000,
+  );
+  assert.equal(
+    resolveConfig({ cacheTtlMs: 5000 }, { DEEPDIVE_CACHE_TTL_MS: "60000" })
+      .cache.ttlMs,
+    5000,
+  );
+});
+
+test("resolveConfig: DEEPDIVE_CACHE_DIR overrides default ~/.deepdive/cache", () => {
+  const c = resolveConfig({}, { DEEPDIVE_CACHE_DIR: "/tmp/custom-cache" });
+  assert.equal(c.cache.dir, "/tmp/custom-cache");
+});
+
+test("resolveConfig: --json flag and DEEPDIVE_JSON=1 both set jsonOutput", () => {
+  assert.equal(resolveConfig({}, {}).jsonOutput, false);
+  assert.equal(resolveConfig({ json: true }, {}).jsonOutput, true);
+  assert.equal(resolveConfig({}, { DEEPDIVE_JSON: "1" }).jsonOutput, true);
 });

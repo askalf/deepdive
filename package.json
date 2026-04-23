@@ -1,6 +1,6 @@
 {
   "name": "@askalf/deepdive",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local research agent. One command, cited answer. Routes every LLM call through your own proxy (dario, Anthropic-compat, OpenAI-compat). Headless browser + pluggable search + multi-provider LLM — zero hosted dependencies.",
   "type": "module",
   "bin": {

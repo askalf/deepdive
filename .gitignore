@@ -9,3 +9,4 @@ dist/
 coverage/
 .nyc_output/
 ~/.deepdive/
+e2e-report.md

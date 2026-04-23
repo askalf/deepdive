@@ -1,7 +1,21 @@
 // Library exports for programmatic use.
 
-export { runAgent, type AgentConfig, type AgentEvent, type AgentResult } from "./agent.js";
-export { planQueries, parsePlan, type Plan } from "./plan.js";
+export {
+  runAgent,
+  type AgentConfig,
+  type AgentEvent,
+  type AgentResult,
+  type BrowserLike,
+  type RoundTrace,
+} from "./agent.js";
+export {
+  planQueries,
+  parsePlan,
+  critique,
+  parseCritique,
+  type Plan,
+  type Critique,
+} from "./plan.js";
 export {
   resolveSearchAdapter,
   dedupeByUrl,
@@ -19,3 +33,5 @@ export {
 } from "./citations.js";
 export { callLLM, type LLMConfig, type LLMMessage, type LLMResult } from "./llm.js";
 export { resolveConfig, type RuntimeConfig, type CLIFlags } from "./config.js";
+export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";
+export { runConcurrent } from "./concurrency.js";
