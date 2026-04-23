@@ -63,7 +63,8 @@ function unwrapDDGRedirect(href: string): string {
   if (href.startsWith("//")) href = "https:" + href;
   try {
     const u = new URL(href);
-    if (u.hostname.endsWith("duckduckgo.com") && u.pathname === "/l/") {
+    const isDDG = u.hostname === "duckduckgo.com" || u.hostname.endsWith(".duckduckgo.com");
+    if (isDDG && u.pathname === "/l/") {
       const uddg = u.searchParams.get("uddg");
       if (uddg) return decodeURIComponent(uddg);
     }
@@ -82,18 +83,42 @@ function isValidHttpUrl(s: string): boolean {
   }
 }
 
-function decodeHtmlEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#x2F;/g, "/")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
+// Exported for unit tests. Single-pass HTML entity decoder — each `&...;`
+// token is resolved exactly once with no rescan, so `&amp;#39;` decodes to
+// the literal `&#39;` rather than double-unescaping to `'`.
+export function decodeHtmlEntities(s: string): string {
+  return s.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);/g, (match, name) => {
+    const named: Record<string, string> = {
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      nbsp: " ",
+    };
+    const low = name.toLowerCase();
+    if (low in named) return named[low];
+    if (name.startsWith("#x") || name.startsWith("#X")) {
+      const code = parseInt(name.slice(2), 16);
+      return isValidCodePoint(code) ? String.fromCodePoint(code) : match;
+    }
+    if (name.startsWith("#")) {
+      const code = parseInt(name.slice(1), 10);
+      return isValidCodePoint(code) ? String.fromCodePoint(code) : match;
+    }
+    return match;
+  });
 }
 
-function stripTags(s: string): string {
-  return s.replace(/<[^>]+>/g, "");
+function isValidCodePoint(n: number): boolean {
+  return Number.isFinite(n) && n >= 0 && n <= 0x10ffff;
+}
+
+// Exported for unit tests. Strips well-formed tags, then drops any stray `<`
+// to defuse malformed/partial tags (e.g. `<scrip` with no closing `>`).
+// Output is plain text destined for markdown citation rows — not
+// HTML-rendered — but we harden here so a malformed snippet can never leak
+// a tag opener into downstream consumers.
+export function stripTags(s: string): string {
+  return s.replace(/<[^>]*>/g, " ").split("<").join(" ");
 }

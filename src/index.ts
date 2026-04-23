@@ -35,3 +35,4 @@ export { callLLM, type LLMConfig, type LLMMessage, type LLMResult } from "./llm.
 export { resolveConfig, type RuntimeConfig, type CLIFlags } from "./config.js";
 export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";
 export { runConcurrent } from "./concurrency.js";
+export { trimTrailingSlashes, stripHashFragment, dedupeKey } from "./url-util.js";

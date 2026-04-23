@@ -1,6 +1,8 @@
 // Search adapter interface. A "search" returns candidate URLs with metadata.
 // Adapters live under src/search/*. Default is DuckDuckGo HTML (no API key).
 
+import { dedupeKey } from "./url-util.js";
+
 export interface SearchResult {
   url: string;
   title: string;
@@ -50,7 +52,7 @@ export function dedupeByUrl(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   const out: SearchResult[] = [];
   for (const r of results) {
-    const key = r.url.replace(/#.*$/, "").replace(/\/+$/, "");
+    const key = dedupeKey(r.url);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(r);
