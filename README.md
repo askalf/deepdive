@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">deepdive</h1>
-  <p align="center"><strong>Open-source Perplexity for your own machine, running on your own Claude Max subscription.</strong><br>Ask it a question. It plans sub-queries, searches the web, reads the pages in a real browser, iterates with a critic loop until the answer stops having gaps, and hands you a cited markdown report. Every LLM call routes through <a href="https://github.com/askalf/dario">dario</a> (or any Anthropic-compat endpoint), so the 30-to-60 calls a single deep query burns bill against <em>your</em> subscription — not a hosted tool's margin on top of a hosted tool's margin.</p>
+  <p align="center"><strong>Your machine. Your LLM subscription. Your search backend. Your cited report.</strong><br>A local research agent: ask a question, it plans sub-queries, searches the web, reads the pages in a real browser, iterates with a critic loop until the answer stops having gaps, and writes you a cited markdown report. Nothing leaves your laptop except the searches you run and the URLs the planner picked to read. Every LLM call routes through <a href="https://github.com/askalf/dario">dario</a> (or any Anthropic-compat endpoint), so the 30-to-60 calls a deep query burns bill against the Claude Max subscription you're already paying for — not a hosted tool stacking its margin on top of Anthropic's API pricing.</p>
 </p>
 
 <p align="center"><em>Zero hosted dependencies. MIT. Independent, unofficial, third-party — see <a href="DISCLAIMER.md">DISCLAIMER.md</a>.</em></p>
@@ -13,18 +13,34 @@
 
 ---
 
-## The point
+## What you keep
 
-Hosted research tools (Perplexity, OpenAI Deep Research, Gemini Deep Research, etc.) solve a real problem: one question → plan → search → read → cited answer. They also:
+Every hosted research tool — Perplexity, OpenAI Deep Research, Gemini Deep Research — solves a real problem: one question → plan → search → read → cited answer. They also quietly take four decisions away from you:
 
-- Send every query to their server.
-- Charge a subscription fee on top of whatever LLM you're already paying for.
-- Pick the model, the search backend, the fetch policy, the prompt, and the citation style for you.
-- Cap research depth so it fits their unit economics — not your question.
+**Your data.** The question, the sub-queries the planner invents, every URL the agent chose to read — all of it goes to the vendor's servers. Often to their analytics pipeline. Sometimes to their ad-targeting pipeline. With deepdive, none of that exists. The planner runs in your Node process. The searches hit whichever backend you point at (DuckDuckGo by default, zero keys required; SearXNG, Brave, or Tavily if you'd rather). The only outbound connections from your machine are: your chosen LLM endpoint, your chosen search endpoint, and the specific URLs the planner decided to read. No telemetry, no analytics, no data retention. Inspectable: `lsof -i` during a run.
 
-deepdive does the same work, but the plan runs on your laptop, the LLM calls go through a router you control, the search adapter is yours to swap, and there is no cap on how deep the loop goes beyond the one you set on the command line. With `--deep`, a critic LLM reviews the draft answer, names the unanswered parts, and the loop runs again until the critic says it's complete. Paired with dario → Claude Max, every one of those iterations bills against the subscription you already pay for.
+**Your model.** Hosted tools pick for you — Perplexity routes through their own blend, OpenAI uses GPT-5, Gemini uses 2.5 Pro. deepdive runs whatever model your endpoint exposes. Default is `claude-sonnet-4-6` for a good quality/cost balance; switch to `claude-opus-4-7` for reasoning-heavy questions; point `--base-url` at a LiteLLM or vLLM instance and run a local model. Same one-line flag either way.
 
-That's the product. The rest of this README is the operator's manual.
+**Your search backend.** Hosted tools use their own search index and won't tell you its exact shape. deepdive swaps between DuckDuckGo HTML (default, no key), self-hosted SearXNG, Brave Search API, or Tavily with one flag. Adding a new adapter is ~30 lines of TypeScript.
+
+**Your depth.** Hosted tools cap how far the agent will dig because unbounded research eats their unit economics. deepdive's `--deep` flag keeps iterating with a critic LLM — review draft → name the gaps → search for them → re-synthesize — until the critic says the answer is complete or you hit `--deep=N` rounds. You decide where the ceiling is.
+
+## What you stop paying for
+
+Most people reading this already pay Anthropic for Claude Max ($100–200/mo). A hosted research tool asks for another $20/mo subscription — on top of a subscription you already have — so some vendor's servers can run LLM calls that your Max plan would have covered for free.
+
+Here's the math for one deep query — a question that needs the critic loop to finish well, roughly 50k–200k tokens across planner + synthesis + critique + re-synthesis:
+
+| How you run it | Per-query cost | Per-month cost at 10 queries | Data stays local? |
+|---|---|---|---|
+| Per-token API (`claude-opus-4-7`) | **~$2–$8** | **~$20–$80** | Your infra, your call |
+| Per-token API (`claude-sonnet-4-6`) | **~$0.30–$1.20** | **~$3–$12** | Your infra, your call |
+| Perplexity Pro | Capped depth, fixed tier | **$20/mo** | ❌ Perplexity + upstream |
+| OpenAI Deep Research (ChatGPT Plus) | Capped usage, fixed tier | **$20/mo** | ❌ OpenAI + upstream |
+| Gemini Deep Research (AI Advanced) | Capped usage, fixed tier | **$20/mo** | ❌ Google + upstream |
+| **deepdive + dario + Claude Max** | **$0 per query** | **$0** (included in Max) | **✅ your machine** |
+
+The cost-arbitrage argument is: the deep-research workload is *exactly* the shape Claude Max was priced for — 50k–200k tokens per question, sustained, bursty. Running it through a second subscription that marks up LLM calls on top of LLM calls is paying twice for something you already bought. dario unlocks the subscription; deepdive is the tool that uses it for this workload.
 
 ---
 
@@ -42,9 +58,7 @@ npx playwright install chromium     # first run only, ~300 MB
 deepdive "how does claude's rate limiter work" --deep --verbose --out=report.md
 ```
 
-`--deep` turns on the critic loop (2 extra rounds by default). `--verbose` streams every plan / search / fetch / critique step to stderr so you can watch the agent think. `--out` writes the final cited markdown to a file in addition to stdout.
-
-Pipe it, grep it, stick it in your research folder. It's plain markdown.
+`--deep` turns on the critic loop (2 extra rounds by default). `--verbose` streams every plan / search / fetch / critique step to stderr so you can watch the agent think. `--out` writes the cited markdown to a file in addition to stdout.
 
 ---
 
@@ -79,27 +93,7 @@ clients can pool-balance intelligently [5].
 5. [dario pool-mode implementation notes](https://github.com/...) — fetched 2026-04-22
 ```
 
-Citations are numbered and inline. The source table at the end records the exact URL and fetch timestamp for every source, so you can verify anything the model claimed.
-
----
-
-## Why this exists
-
-Three tools already do this and charge for it. deepdive exists because each one takes a decision away from you:
-
-| | Perplexity | OpenAI Deep Research | Gemini Deep Research | **deepdive** |
-|---|---|---|---|---|
-| Who runs the agent loop | Their server | Their server | Their server | **Your machine** |
-| Which model synthesizes | Their choice | GPT-5 | Gemini 2.5 Pro | **Any Anthropic-compat model** |
-| Which search backend | Theirs | Theirs | Google | **DDG / SearXNG / Brave / Tavily — your pick** |
-| Who sees your queries | Perplexity + upstream | OpenAI + upstream | Google + upstream | **Only the sites you searched** |
-| How deep can it go | Capped | Capped | Capped | **You set the cap** |
-| Billing path | Their subscription + their margin | GPT-5 tokens, metered | Gemini tokens, metered | **Your existing Claude Max, via dario** |
-| Source code | Closed | Closed | Closed | **Open** |
-
-Pair it with [dario](https://github.com/askalf/dario) and the deep-research workload — which is the single most token-hungry thing a consumer can do with an LLM, 50k to 200k tokens per question once the critic loop kicks in — lands on the subscription Anthropic built for exactly that profile. Per-token API pricing would put a single deep question at a few dollars. Through dario → Claude Max it's part of a flat monthly bill you're already paying.
-
-That's why deepdive and dario are the same product in two pieces. dario is the routing layer that makes your subscription visible to any tool. deepdive is the first tool that uses the routing layer for a workload that nothing else in your toolchain runs.
+Citations are numbered and inline. The source table at the end records the exact URL and fetch timestamp for every source, so you can verify any claim the model made.
 
 ---
 
@@ -122,7 +116,7 @@ The critic reads its own draft, flags gaps ("the draft didn't source the 429 hea
 
 Bare `--deep` = 2 extra rounds. `--deep=5` = up to 5. `--deep=0` is explicit single-pass.
 
-**What this costs.** Each round is roughly `1 search_llm_call + N page_fetches + 1 synth_llm_call + 1 critic_llm_call`. A 3-round deep query against claude-sonnet-4-6 typically lands 40–80k tokens. On a Claude Max plan via dario: ~free. On per-token API pricing: several dollars. On Perplexity: limited by their internal cap regardless of what you're willing to spend.
+**Why this is the whole point.** The critic loop is the axis hosted tools cap on. Per-query unit economics force them to ship a fixed depth — if they let you run a 5-round loop, some users would and their margins would collapse. On your own subscription, the only cap is the one you set on the command line.
 
 ---
 
@@ -133,9 +127,9 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | Flag | Default | Why |
 |---|---|---|
 | `--deep[=<n>]` | off (bare = 2) | Turn on the critic loop. This is the headline feature. |
-| `--model=<name>` | `claude-sonnet-4-6` | Try `claude-opus-4-7` on questions that need real reasoning. |
+| `--model=<name>` | `claude-sonnet-4-6` | Try `claude-opus-4-7` on reasoning-heavy questions. |
 | `--search=<adapter>` | `duckduckgo` | `searxng` for privacy, `brave` for quality, `tavily` for research-tuned results. |
-| `--max-sources=<n>` | `12` per round | Upper bound. Deep mode adds sources across rounds, capped each round. |
+| `--max-sources=<n>` | `12` per round | Upper bound. Deep mode accumulates across rounds, capped each round. |
 | `--concurrency=<n>` | `4` | Parallel fetches. Bump on a fast connection. |
 | `--json` | markdown | Emit `{question, plan, rounds, sources, answer, usage}` for piping. |
 | `--out=<path>` | — | Save to file. |
@@ -211,8 +205,8 @@ All event types, the round-trace structure, and the browser-factory injection po
 |---|---|
 | **Runtime dependencies** | One — `playwright`. No hosted services, no telemetry. |
 | **Credentials** | API keys live in env vars or CLI flags; deepdive never persists them. Cache files store fetched page content only, never auth. |
-| **Network scope** | LLM endpoint (your choice), search backend (your choice), and the actual URLs your planner picked to read. No other outbound traffic. |
-| **Telemetry** | None. Zero analytics, tracking, or data collection. |
+| **Network scope** | LLM endpoint (your choice), search backend (your choice), and the actual URLs your planner picked to read. No other outbound traffic. Verify with `lsof -i` during a run. |
+| **Telemetry** | None. Zero analytics, tracking, or data collection. Deliberately, not aspirationally. |
 | **License** | MIT |
 
 See [DISCLAIMER.md](DISCLAIMER.md) for the full AS IS / no-affiliation / user-responsibility terms.
