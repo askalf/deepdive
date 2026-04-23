@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### CI — foundation parity with dario / claude-bridge
+
+Brings deepdive's CI surface up to the maturity of the sibling repos:
+
+- **`actionlint.yml`** — `actionlint` v1.7.1 runs on every PR + push. No path filter (required-checks gate would never report on src-only PRs if filtered — classic footgun fixed on dario + claude-bridge already).
+- **`dependabot.yml`** — weekly (Monday 09:00 UTC) npm + github-actions version updates. Non-major grouped per ecosystem; majors open individually so they get real review.
+- **`stale.yml`** — `actions/stale@v10.2.0` daily at 04:30 UTC. 60 days to warn, 14 to close. Exempts `security`/`auth`/`review-feedback`/`help-wanted`/`good-first-issue`/`pinned` for issues, plus `wip`/`blocked`/`security` for PRs.
+- **`ci.yml`** — added `typecheck` step (`tsc --noEmit`) as a separate CI step before `build`, so type errors surface before the tsc emit step does. Matrix stays at Node 20 / 22 (engines `>=20.0.0` rules out 18; `node --test --test-concurrency` also needs 20.11+).
+- **Labels** — `security`, `auth`, `pinned`, `wip`, `blocked`, `review-feedback` created out-of-band to match the dario / claude-bridge vocabulary. Referenced by the stale-bot exempts above.
+- Repo setting `allow_update_branch` toggled on so auto-merge can rebase PRs against master without the maintainer clicking "Update branch".
+
+No runtime behavior change; scaffolding for the work still to come (promoting Unreleased to a v0.3.0 release, porting the auto-release-on-version-bump workflow from dario).
+
 ### Added
 - **Streaming synthesis.** The final-answer synthesizer now uses Anthropic's SSE streaming endpoint, so tokens land on stdout as the model writes them instead of the user staring at a blank terminal for 30+ seconds on a deep query. On by default for single-pass, TTY-connected, non-JSON runs. Auto-disabled for `--json`, `--deep` (intermediate rounds would print multiple full drafts back-to-back), non-TTY stdout (pipes), or `--no-stream`. New exports: `callLLMStream`, `parseSSE`, `parseBlocks`, `StreamOptions`. New CLI flag `--no-stream` and env var `DEEPDIVE_NO_STREAM=1`. Retry applies to the initial connect only — once we start emitting tokens, a mid-stream failure can't be undone.
 - New agent hook `AgentConfig.onSynthesizeToken?: (chunk, round) => void` for library consumers that want to surface tokens during synthesis.
