@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-23
+
+Streaming synthesis, `deepdive doctor`, LLM retry + per-call timeout, robots.txt respect, CI foundation parity with dario / claude-bridge, auto-release workflow preemptively ported, CodeQL pass, home-dir scrubbing on error output.
+
 ### CI — foundation parity with dario / claude-bridge
 
 Brings deepdive's CI surface up to the maturity of the sibling repos:
@@ -16,8 +20,6 @@ Brings deepdive's CI surface up to the maturity of the sibling repos:
 - **`ci.yml`** — added `typecheck` step (`tsc --noEmit`) as a separate CI step before `build`, so type errors surface before the tsc emit step does. Matrix stays at Node 20 / 22 (engines `>=20.0.0` rules out 18; `node --test --test-concurrency` also needs 20.11+).
 - **Labels** — `security`, `auth`, `pinned`, `wip`, `blocked`, `review-feedback` created out-of-band to match the dario / claude-bridge vocabulary. Referenced by the stale-bot exempts above.
 - Repo setting `allow_update_branch` toggled on so auto-merge can rebase PRs against master without the maintainer clicking "Update branch".
-
-No runtime behavior change; scaffolding for the work still to come (promoting Unreleased to a v0.3.0 release).
 
 ### CI — auto-release workflow (ports the dario pattern preemptively)
 
