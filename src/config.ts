@@ -16,6 +16,7 @@ export interface RuntimeConfig {
   deepRounds: number;
   concurrency: number;
   cache: { enabled: boolean; dir: string; ttlMs: number };
+  respectRobots: boolean;
   jsonOutput: boolean;
   verbose: boolean;
 }
@@ -36,6 +37,7 @@ export interface CLIFlags {
   concurrency?: number;
   noCache?: boolean;
   cacheTtlMs?: number;
+  ignoreRobots?: boolean;
   json?: boolean;
   verbose?: boolean;
 }
@@ -128,6 +130,8 @@ export function resolveConfig(
     parsePositiveInt(env.DEEPDIVE_CACHE_TTL_MS) ??
     DEFAULTS.cacheTtlMs;
 
+  const respectRobots =
+    !(flags.ignoreRobots ?? env.DEEPDIVE_IGNORE_ROBOTS === "1");
   const jsonOutput = flags.json ?? env.DEEPDIVE_JSON === "1";
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
 
@@ -152,6 +156,7 @@ export function resolveConfig(
     deepRounds,
     concurrency,
     cache: { enabled: cacheEnabled, dir: cacheDir, ttlMs: cacheTtlMs },
+    respectRobots,
     jsonOutput,
     verbose,
   };
