@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### CI — auto-release workflow (ports the dario pattern preemptively)
+
+New `.github/workflows/auto-release.yml`. Fires on merge of any PR to master; exits in ~10s unless `package.json.version` changed from the parent commit, in which case it creates the matching `vX.Y.Z` tag and GitHub release (extracting the CHANGELOG section for the version as release notes). `publish.yml` then fires on `release:published` and runs `npm publish --access public --provenance`.
+
+Ported from dario where it was added as a root-cause fix after v3.31.8–v3.31.11 sat on master for a week without reaching npm (maintainer bumped the version, merged the PR, and forgot `gh release create` four times in a row). Deepdive is in the same position today — v0.2.0 CHANGELOG-dated but only v0.1.0 on npm. Shipping this workflow before the next release prevents the gap from opening again.
+
+Guards stacked: `merged == true`, version must differ from HEAD^1, new version must match `X.Y.Z`, tag must not already exist. Any guard tripped → skip cleanly rather than fail silently.
+
 ### Added
 - **Streaming synthesis.** The final-answer synthesizer now uses Anthropic's SSE streaming endpoint, so tokens land on stdout as the model writes them instead of the user staring at a blank terminal for 30+ seconds on a deep query. On by default for single-pass, TTY-connected, non-JSON runs. Auto-disabled for `--json`, `--deep` (intermediate rounds would print multiple full drafts back-to-back), non-TTY stdout (pipes), or `--no-stream`. New exports: `callLLMStream`, `parseSSE`, `parseBlocks`, `StreamOptions`. New CLI flag `--no-stream` and env var `DEEPDIVE_NO_STREAM=1`. Retry applies to the initial connect only — once we start emitting tokens, a mid-stream failure can't be undone.
 - New agent hook `AgentConfig.onSynthesizeToken?: (chunk, round) => void` for library consumers that want to surface tokens during synthesis.
