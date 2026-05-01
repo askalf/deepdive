@@ -43,6 +43,12 @@ export async function resolveSearchAdapter(
       if (!key) throw new Error("tavily adapter requires DEEPDIVE_TAVILY_KEY");
       return new TavilySearch(key);
     }
+    case "exa": {
+      const { ExaSearch } = await import("./search/exa.js");
+      const key = env.DEEPDIVE_EXA_KEY;
+      if (!key) throw new Error("exa adapter requires DEEPDIVE_EXA_KEY");
+      return new ExaSearch(key);
+    }
     default:
       throw new Error(`unknown search adapter: ${name}`);
   }
