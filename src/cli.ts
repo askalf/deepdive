@@ -37,7 +37,7 @@ Flags:
   --api-key=<key>               LLM API key. Default: dario
   --model=<name>                Model to use. Default: claude-sonnet-4-6
   --max-tokens=<n>              Output max tokens per LLM call. Default: 4096
-  --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily
+  --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa
                                 Default: duckduckgo (no key required)
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
@@ -63,7 +63,7 @@ Flags:
 
 Environment:
   DEEPDIVE_BASE_URL, DEEPDIVE_API_KEY, DEEPDIVE_MODEL, DEEPDIVE_SEARCH,
-  DEEPDIVE_SEARXNG_URL, DEEPDIVE_BRAVE_KEY, DEEPDIVE_TAVILY_KEY,
+  DEEPDIVE_SEARXNG_URL, DEEPDIVE_BRAVE_KEY, DEEPDIVE_TAVILY_KEY, DEEPDIVE_EXA_KEY,
   DEEPDIVE_MAX_SOURCES, DEEPDIVE_FETCH_TIMEOUT_MS, DEEPDIVE_HEADED,
   DEEPDIVE_DEEP_ROUNDS, DEEPDIVE_CONCURRENCY, DEEPDIVE_NO_CACHE,
   DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE,
