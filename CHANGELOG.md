@@ -6,7 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### CI — auto-release workflow now publishes to npm inline
+## [0.4.0] - 2026-05-02
+
+Adds **Exa** as a fifth search adapter alongside DuckDuckGo, SearXNG, Brave, and Tavily — the first community-contributed adapter ([@tgonzalezc5](https://github.com/tgonzalezc5), [#19](https://github.com/askalf/deepdive/pull/19)). This release also exercises the `auto-release.yml` inline-publish chain end-to-end for the first time (the latent bug fixed in v0.3.0's CHANGELOG entry).
+
+### Added — Exa search adapter (community contribution, #19)
+
+New `ExaSearch` adapter at `src/search/exa.ts` (~75 lines, no new runtime deps). Exa is a neural-search API tuned for long, intent-rich queries — the shape deepdive's planner sub-queries and the critic loop's gap-filling follow-ups tend to take. Uses raw `fetch` matching the Tavily / Brave pattern.
+
+- Wired into `resolveSearchAdapter` behind `--search=exa` and `DEEPDIVE_EXA_KEY`.
+- Pure mapping function `mapExaResults` extracted for testability per the project's "pure decision functions" principle.
+- Snippet cascade: highlights → text → summary → "" so the adapter degrades gracefully across content modes.
+- Includes `x-exa-integration: deepdive` header for usage attribution.
+- `deepdive doctor` picks up the new adapter automatically via `resolveSearchAdapter`.
+- 14 new tests in `test/exa-adapter.test.mjs` covering parsing, snippet fallback cascade, resolver wiring, request shape (headers, body, numResults cap), and HTTP error handling. Total test footprint now 212 across 4 suites.
+
+```bash
+export DEEPDIVE_EXA_KEY=...
+deepdive "how does claude's rate limiter work" --search=exa --deep --verbose --out=report.md
+```
+
+README adapter table, flag table, sovereignty paragraph, `--help` output, and env-var list all updated.
+
+### CI — auto-release workflow now publishes to npm inline (validates v0.3.0's pending fix)
 
 v0.3.0 surfaced a latent chain-break: the newly-ported `auto-release.yml` created the GitHub release via `GITHUB_TOKEN`, but **GitHub intentionally doesn't fire workflows for events created by `GITHUB_TOKEN`** (loop protection). So `publish.yml`'s `release:published` trigger never fired, and v0.3.0 needed a manual delete+recreate of the release (from a human token) to kick publish. Same latent bug ported cleanly from dario — the chain worked there only because every dario release so far had been a manual `gh release create` from the maintainer, which *does* fire downstream workflows.
 
@@ -16,7 +38,7 @@ Fix: inline the build + test + publish steps into `auto-release.yml` itself. Net
 
 `publish.yml` stays in place for the *manual* release case: a maintainer running `gh release create` locally still fires `publish.yml` via the release-published event (that release isn't from `GITHUB_TOKEN`, so it does trigger workflows).
 
-Added `id-token: write` permission to `auto-release.yml` for the SLSA provenance attestation. No runtime-behavior change for users; next PR that bumps `package.json.version` will exercise the fixed chain end-to-end.
+Added `id-token: write` permission to `auto-release.yml` for the SLSA provenance attestation. **v0.4.0 is the first release that exercises this fixed chain end-to-end.**
 
 ## [0.3.0] - 2026-04-23
 
