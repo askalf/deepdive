@@ -17,6 +17,7 @@ import { resolveSearchAdapter } from "./search.js";
 import { runAgent, type AgentEvent } from "./agent.js";
 import { createCache } from "./cache.js";
 import { renderSourcesMarkdown } from "./citations.js";
+import type { VerificationReport } from "./verify.js";
 import {
   runDoctor,
   renderDoctorText,
@@ -53,6 +54,9 @@ Flags:
   --no-cache                    Disable the on-disk page cache (default: enabled)
   --cache-ttl-ms=<ms>           Page cache TTL. Default: 3600000 (1 hour)
   --ignore-robots               Bypass robots.txt checks (default: respect them)
+  --no-verify-cites             Skip lexical citation verification (default: on)
+  --strict-cites                Exit non-zero if any citation is unsupported
+  --cite-min-recall=<0..1>      Threshold for citation support. Default: 0.4
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
   --verbose, -v                 Stream progress events to stderr
@@ -67,7 +71,8 @@ Environment:
   DEEPDIVE_MAX_SOURCES, DEEPDIVE_FETCH_TIMEOUT_MS, DEEPDIVE_HEADED,
   DEEPDIVE_DEEP_ROUNDS, DEEPDIVE_CONCURRENCY, DEEPDIVE_NO_CACHE,
   DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE,
-  DEEPDIVE_LLM_TIMEOUT_MS, DEEPDIVE_LLM_ATTEMPTS
+  DEEPDIVE_LLM_TIMEOUT_MS, DEEPDIVE_LLM_ATTEMPTS,
+  DEEPDIVE_NO_VERIFY_CITES, DEEPDIVE_STRICT_CITES, DEEPDIVE_CITE_MIN_RECALL
 `;
 
 interface ParsedArgs {
@@ -99,6 +104,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--ignore-robots") {
       flags.ignoreRobots = true;
+      continue;
+    }
+    if (a === "--no-verify-cites") {
+      flags.noVerifyCites = true;
+      continue;
+    }
+    if (a === "--strict-cites") {
+      flags.strictCites = true;
       continue;
     }
     if (a === "--json") {
@@ -160,6 +173,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "cache-ttl-ms":
           flags.cacheTtlMs = parsePositiveInt(value);
           break;
+        case "cite-min-recall":
+          flags.citeMinRecall = parseUnitFloat(value);
+          break;
         case "out":
           outPath = value;
           break;
@@ -197,6 +213,12 @@ function parseNonNegativeInt(s: string): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
+function parseUnitFloat(s: string): number | undefined {
+  if (!/^\d+(\.\d+)?$|^\.\d+$/.test(s)) return undefined;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : undefined;
+}
+
 function renderEvent(e: AgentEvent): string {
   switch (e.type) {
     case "plan.start":
@@ -225,11 +247,43 @@ function renderEvent(e: AgentEvent): string {
       return e.critique.done
         ? `  critic  answer complete (${e.critique.reasoning || "no reasoning given"})`
         : `  critic  ${e.critique.queries.length} follow-up quer${e.critique.queries.length === 1 ? "y" : "ies"}`;
+    case "verify.done": {
+      const r = e.report;
+      if (r.unsupported.length === 0) {
+        return `  verify  ${r.supportedCitations}/${r.totalCitations} citations supported`;
+      }
+      const lines = [
+        `  verify  ⚠ ${r.totalCitations - r.supportedCitations}/${r.totalCitations} citations weak (threshold ${r.threshold})`,
+      ];
+      for (const c of r.unsupported) {
+        const worst = c.unsupportedIds
+          .map((id) => `[${id}] ${c.recallByCite[id].toFixed(2)}`)
+          .join(", ");
+        lines.push(`          ⚠ "${ellipsize(c.sentence, 80)}" — ${worst}`);
+      }
+      return lines.join("\n");
+    }
   }
 }
 
 function ellipsize(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
+}
+
+// Renders a small markdown footer when the verification report has any
+// unsupported citations. Returns "" otherwise so clean runs stay clean.
+// Exported for unit tests.
+export function renderCitationHealthFooter(
+  report: VerificationReport | undefined,
+): string {
+  if (!report || report.unsupported.length === 0) return "";
+  const weak = report.totalCitations - report.supportedCitations;
+  return (
+    `\n## Citation health\n\n` +
+    `⚠ ${weak} of ${report.totalCitations} citations have low lexical support ` +
+    `in their cited source (threshold ${report.threshold}). ` +
+    `Run with \`--verbose\` to see which.\n`
+  );
 }
 
 // Exported for unit tests. User-facing error rendering at the CLI boundary.
@@ -311,6 +365,8 @@ async function main(argv: string[]): Promise<number> {
         concurrency: config.concurrency,
         cache,
         respectRobots: config.respectRobots,
+        verifyCitations: config.verifyCitations,
+        citeMinRecall: config.citeMinRecall,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
         },
@@ -324,19 +380,24 @@ async function main(argv: string[]): Promise<number> {
       ac.signal,
     );
 
+    const citeFooter = renderCitationHealthFooter(result.verification);
+    const strictFail =
+      config.strictCitations &&
+      (result.verification?.unsupported.length ?? 0) > 0;
+
     if (streaming && streamed) {
       // Streaming mode already wrote the header + answer tokens. Close with
-      // the sources block and (if requested) write the full markdown to the
-      // output file too.
-      const tail = "\n\n" + renderSourcesMarkdown(result.sources);
+      // the sources block, optional citation-health footer, and (if
+      // requested) write the full markdown to the output file too.
+      const tail = "\n\n" + renderSourcesMarkdown(result.sources) + citeFooter;
       process.stdout.write(tail);
       if (!tail.endsWith("\n")) process.stdout.write("\n");
       if (parsed.outPath) {
         const path = resolve(parsed.outPath);
-        writeFileSync(path, result.markdown, "utf-8");
+        writeFileSync(path, result.markdown + citeFooter, "utf-8");
         process.stderr.write(`\nwrote ${path}\n`);
       }
-      return 0;
+      return strictFail ? 1 : 0;
     }
 
     const output = config.jsonOutput
@@ -352,12 +413,15 @@ async function main(argv: string[]): Promise<number> {
               fetchedAt: s.fetchedAt,
             })),
             answer: result.answer,
+            verification: result.verification,
             usage: result.usage,
           },
           null,
           2,
         ) + "\n"
-      : result.markdown + (result.markdown.endsWith("\n") ? "" : "\n");
+      : result.markdown +
+        (result.markdown.endsWith("\n") ? "" : "\n") +
+        citeFooter;
 
     process.stdout.write(output);
 
@@ -366,7 +430,7 @@ async function main(argv: string[]): Promise<number> {
       writeFileSync(path, output, "utf-8");
       process.stderr.write(`\nwrote ${path}\n`);
     }
-    return 0;
+    return strictFail ? 1 : 0;
   } catch (err) {
     process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
     return 1;

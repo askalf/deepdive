@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
-import { safeErrorMessage } from "../dist/cli.js";
+import { safeErrorMessage, renderCitationHealthFooter } from "../dist/cli.js";
 
 test("safeErrorMessage: home dir scrubbed from Error.message", () => {
   const home = homedir();
@@ -41,4 +41,36 @@ test("safeErrorMessage: backslashes normalized to forward slashes", () => {
   const err = new Error(`ENOENT at ${home}\\a\\b\\c`);
   const out = safeErrorMessage(err);
   assert.ok(!out.includes("\\"), `no backslashes in output: ${out}`);
+});
+
+test("renderCitationHealthFooter: returns '' when report is undefined", () => {
+  assert.equal(renderCitationHealthFooter(undefined), "");
+});
+
+test("renderCitationHealthFooter: returns '' when all citations supported", () => {
+  const report = {
+    threshold: 0.4,
+    totalCitations: 3,
+    supportedCitations: 3,
+    checks: [],
+    unsupported: [],
+  };
+  assert.equal(renderCitationHealthFooter(report), "");
+});
+
+test("renderCitationHealthFooter: emits a footer when there are unsupported cites", () => {
+  const report = {
+    threshold: 0.4,
+    totalCitations: 5,
+    supportedCitations: 3,
+    checks: [],
+    unsupported: [
+      { sentence: "x", citedIds: [1], unsupportedIds: [1], recallByCite: { 1: 0.1 }, supported: false },
+      { sentence: "y", citedIds: [2], unsupportedIds: [2], recallByCite: { 2: 0.2 }, supported: false },
+    ],
+  };
+  const out = renderCitationHealthFooter(report);
+  assert.match(out, /## Citation health/);
+  assert.match(out, /2 of 5/);
+  assert.match(out, /threshold 0\.4/);
 });

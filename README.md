@@ -120,6 +120,18 @@ Bare `--deep` = 2 extra rounds. `--deep=5` = up to 5. `--deep=0` is explicit sin
 
 ---
 
+## Citation verification
+
+After every synthesis, deepdive checks each `[N]` citation in the answer against the extracted text of source N. This is a cheap, deterministic, lexical pass — no second LLM call — that catches the dominant failure mode of cited-answer tools: the model writing a confident sentence with a `[3]` whose source 3 doesn't actually contain the claim.
+
+For each sentence with a citation, the verifier tokenizes the claim into content tokens (lowercased, stop-words dropped, numbers preserved) and scores recall against each cited source's tokens. A multi-cite sentence like `"X happened in 2024 [1][3]"` is supported only when **every** cited source clears the threshold — a bogus `[3]` buried in an otherwise-true sentence is still flagged.
+
+When something fails, deepdive prints a small `## Citation health` footer at the end of the answer and surfaces the offending sentences in `--verbose`. Clean runs stay clean: no footer, no noise. Use `--strict-cites` in scripts to fail the run with a non-zero exit code.
+
+What this is not: a semantic judge. Lexical recall flags hallucinated names, numbers, and dates with high precision, but a paraphrased-but-truthful sentence can score below threshold and a topic-aligned-but-incorrect sentence can score above. Treat the report as a sanity check and a reading guide, not a proof of correctness. To dial the strictness, raise `--cite-min-recall` above the default `0.4`; to disable entirely, pass `--no-verify-cites`.
+
+---
+
 ## Common flags
 
 Run `deepdive --help` for the full list. The ones you'll reach for:
@@ -131,9 +143,12 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | `--search=<adapter>` | `duckduckgo` | `searxng` for privacy, `brave` for quality, `tavily` or `exa` for research-tuned results. |
 | `--max-sources=<n>` | `12` per round | Upper bound. Deep mode accumulates across rounds, capped each round. |
 | `--concurrency=<n>` | `4` | Parallel fetches. Bump on a fast connection. |
-| `--json` | markdown | Emit `{question, plan, rounds, sources, answer, usage}` for piping. |
+| `--strict-cites` | off | Exit non-zero if any citation in the answer fails lexical verification. |
+| `--cite-min-recall=<0..1>` | `0.4` | Citation-support threshold. Lower = more permissive. |
+| `--no-verify-cites` | off | Skip the citation-verification pass entirely. |
+| `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, usage}` for piping. |
 | `--out=<path>` | — | Save to file. |
-| `--verbose`, `-v` | — | Stream plan / search / fetch / critique events to stderr. |
+| `--verbose`, `-v` | — | Stream plan / search / fetch / critique / verify events to stderr. |
 
 Every flag mirrors a `DEEPDIVE_*` env var. CLI flags win over env.
 

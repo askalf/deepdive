@@ -45,6 +45,18 @@ export { retry, backoffDelay, type RetryOptions } from "./retry.js";
 export { resolveConfig, type RuntimeConfig, type CLIFlags } from "./config.js";
 export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";
 export { runConcurrent } from "./concurrency.js";
+export {
+  verifyCitations,
+  splitSentences,
+  extractCiteIds,
+  contentTokens,
+  recall,
+  stripSourcesBlock,
+  DEFAULT_CITE_MIN_RECALL,
+  type CitationCheck,
+  type VerificationReport,
+  type VerifyOptions,
+} from "./verify.js";
 export { trimTrailingSlashes, stripHashFragment, dedupeKey } from "./url-util.js";
 export {
   runDoctor,

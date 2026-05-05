@@ -125,3 +125,23 @@ test("parseArgs: --no-stream", () => {
   const p = parseArgs(["q", "--no-stream"]);
   assert.equal(p.flags.noStream, true);
 });
+
+test("parseArgs: --no-verify-cites flag", () => {
+  const p = parseArgs(["q", "--no-verify-cites"]);
+  assert.equal(p.flags.noVerifyCites, true);
+});
+
+test("parseArgs: --strict-cites flag", () => {
+  const p = parseArgs(["q", "--strict-cites"]);
+  assert.equal(p.flags.strictCites, true);
+});
+
+test("parseArgs: --cite-min-recall=0.6 parses", () => {
+  const p = parseArgs(["q", "--cite-min-recall=0.6"]);
+  assert.equal(p.flags.citeMinRecall, 0.6);
+});
+
+test("parseArgs: --cite-min-recall=2 (out of range) yields undefined", () => {
+  const p = parseArgs(["q", "--cite-min-recall=2"]);
+  assert.equal(p.flags.citeMinRecall, undefined);
+});
