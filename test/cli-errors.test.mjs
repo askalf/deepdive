@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
-import { safeErrorMessage, renderCitationHealthFooter } from "../dist/cli.js";
+import {
+  safeErrorMessage,
+  renderCitationHealthFooter,
+  renderCostSummary,
+} from "../dist/cli.js";
 
 test("safeErrorMessage: home dir scrubbed from Error.message", () => {
   const home = homedir();
@@ -56,6 +60,32 @@ test("renderCitationHealthFooter: returns '' when all citations supported", () =
     unsupported: [],
   };
   assert.equal(renderCitationHealthFooter(report), "");
+});
+
+test("renderCostSummary: appends the dario hint when baseUrl matches", () => {
+  const cost = {
+    amountUsd: 0.034,
+    knownModel: true,
+    inputTokens: 12_100,
+    outputTokens: 4_200,
+    calls: 4,
+  };
+  const out = renderCostSummary(cost, "claude-sonnet-4-6", "http://localhost:3456");
+  assert.match(out, /^cost · /);
+  assert.match(out, /\$0 on Claude Max via dario/);
+});
+
+test("renderCostSummary: omits the dario hint when baseUrl is something else", () => {
+  const cost = {
+    amountUsd: 0.034,
+    knownModel: true,
+    inputTokens: 12_100,
+    outputTokens: 4_200,
+    calls: 4,
+  };
+  const out = renderCostSummary(cost, "claude-sonnet-4-6", "https://api.anthropic.com");
+  assert.match(out, /^cost · /);
+  assert.doesNotMatch(out, /Claude Max/);
 });
 
 test("renderCitationHealthFooter: emits a footer when there are unsupported cites", () => {

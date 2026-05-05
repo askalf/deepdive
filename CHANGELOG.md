@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-05
+
+Adds **per-run cost telemetry**: every run now prints a one-line summary of the LLM tokens it consumed and what the same workload would have cost at API list prices, reinforcing the README cost-arbitrage table with real numbers from real runs.
+
+### Added — cost telemetry (`src/pricing.ts`, ~110 lines, no new runtime deps)
+
+- New module `src/pricing.ts` with `priceFor`, `estimateCost`, `formatCostLine`, `formatUsd`, `formatTokens`, `looksLikeDario`, plus a `PRICE_TABLE` covering `claude-sonnet-4-6` (3/15 per MTok), `claude-opus-4-7` (15/75), and `claude-haiku-4-5` (0.80/4). All pure — no LLM, no network, no disk.
+- Token counts come straight from Anthropic's response/SSE `usage` field — already returned by both `callLLM` and `callLLMStream`. Newly threaded up through `planQueries`, `synthesize`, and `critique` via an optional `onUsage` callback (additive — existing callers see no behavior change).
+- Agent accumulates input/output tokens across plan + synth + critique calls. Exposes `AgentResult.cost: CostEstimate` and `AgentResult.usage.{llm: {inputTokens, outputTokens, calls}, estimatedCostUsd}` for library consumers.
+- New `llm.call` agent event with `phase` (`plan` / `synth` / `critique`), `round`, and per-call token counts; renders as a `llm` line in `--verbose`.
+- End-of-run summary on stderr (always; CI-suitable since it never touches stdout). When `--base-url` matches dario's default port (`http://localhost:3456`), an honesty-framing hint is appended:
+  ```
+  cost · ~$0.0085 · 412 in / 234 out · 4 LLM calls · claude-sonnet-4-6
+         (≈ at API list price; $0 on Claude Max via dario)
+  ```
+  Pointing at a different base URL auto-suppresses the hint.
+- Unknown models render as `$?` (no fabricated numbers). Self-hosted endpoints can plug in pricing via `DEEPDIVE_PRICE_INPUT_PER_MTOK` and `DEEPDIVE_PRICE_OUTPUT_PER_MTOK`. Env override only fills in for unknown models — known models always use the table (which is canonical).
+- `--json` output gains a top-level `cost` key alongside the existing `usage` block.
+
+### Added — CLI flag
+
+- `--no-cost` / `DEEPDIVE_NO_COST=1` — suppress the stderr summary line.
+
+### Tests
+
+24 new pricing unit tests + 3 new agent-loop integration tests (usage accumulation across plan/synth/critique with mock token counts; `llm.call` event emission; unknown-model graceful path) + 2 CLI/config flag-plumbing tests + 2 cost-summary render tests. Total test footprint now 275 across 6 suites.
+
 ## [0.5.0] - 2026-05-05
 
 Adds **lexical citation verification**: every `[N]` reference in a synthesized answer is now checked against the extracted text of source N before the markdown is finalized, catching the dominant failure mode of cited-answer tools (confident sentences pointing at sources that don't actually support them).

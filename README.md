@@ -132,6 +132,21 @@ What this is not: a semantic judge. Lexical recall flags hallucinated names, num
 
 ---
 
+## Cost telemetry
+
+Every run prints a one-line summary on stderr at the end:
+
+```
+cost · ~$0.0085 · 412 in / 234 out · 4 LLM calls · claude-sonnet-4-6
+       (≈ at API list price; $0 on Claude Max via dario)
+```
+
+Token counts come straight from the Anthropic API responses. The dollar amount is computed against a small built-in price table covering the headline Claude models — see `src/pricing.ts` for current values; verify against [docs.anthropic.com/en/docs/about-claude/pricing](https://docs.anthropic.com/en/docs/about-claude/pricing) before relying on it for billing decisions. Unknown models render as `$?`; tokens are always shown.
+
+The "$0 on Claude Max via dario" hint only appears when `--base-url` matches dario's default port (`http://localhost:3456`) — pointing at a different endpoint suppresses it automatically. Self-hosted or unfamiliar models can plug in their own pricing via `DEEPDIVE_PRICE_INPUT_PER_MTOK` and `DEEPDIVE_PRICE_OUTPUT_PER_MTOK` (per million tokens). Suppress the line entirely with `--no-cost` or `DEEPDIVE_NO_COST=1`. The same numbers also appear in `--json` output as `cost` and `usage.{llm,estimatedCostUsd}` for piping into your own dashboards.
+
+---
+
 ## Common flags
 
 Run `deepdive --help` for the full list. The ones you'll reach for:
@@ -146,7 +161,8 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | `--strict-cites` | off | Exit non-zero if any citation in the answer fails lexical verification. |
 | `--cite-min-recall=<0..1>` | `0.4` | Citation-support threshold. Lower = more permissive. |
 | `--no-verify-cites` | off | Skip the citation-verification pass entirely. |
-| `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, usage}` for piping. |
+| `--no-cost` | off | Suppress the end-of-run cost summary on stderr. |
+| `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, cost, usage}` for piping. |
 | `--out=<path>` | — | Save to file. |
 | `--verbose`, `-v` | — | Stream plan / search / fetch / critique / verify events to stderr. |
 

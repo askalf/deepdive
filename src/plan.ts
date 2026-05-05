@@ -5,7 +5,9 @@
 // and the queries already tried, the critic proposes 0–3 follow-up queries
 // that would fill the gaps — or declares the answer done.
 
-import { callLLM, type LLMConfig } from "./llm.js";
+import { callLLM, type LLMConfig, type LLMResult } from "./llm.js";
+
+export type UsageSink = (usage: NonNullable<LLMResult["usage"]>) => void;
 
 export interface Plan {
   queries: string[];
@@ -33,13 +35,15 @@ export async function planQueries(
   question: string,
   config: LLMConfig,
   signal?: AbortSignal,
+  onUsage?: UsageSink,
 ): Promise<Plan> {
-  const { text } = await callLLM(
+  const { text, usage } = await callLLM(
     [{ role: "user", content: question }],
     PLANNER_SYSTEM,
     config,
     signal,
   );
+  if (usage && onUsage) onUsage(usage);
   return parsePlan(text);
 }
 
@@ -88,6 +92,7 @@ export async function critique(
   priorQueries: string[],
   config: LLMConfig,
   signal?: AbortSignal,
+  onUsage?: UsageSink,
 ): Promise<Critique> {
   const userMessage =
     `Question: ${question}\n\n` +
@@ -95,12 +100,13 @@ export async function critique(
     `Queries already run (${priorQueries.length}):\n` +
     priorQueries.map((q) => `- ${q}`).join("\n") +
     `\n\nReview the draft and propose follow-up queries if needed.`;
-  const { text } = await callLLM(
+  const { text, usage } = await callLLM(
     [{ role: "user", content: userMessage }],
     CRITIC_SYSTEM,
     config,
     signal,
   );
+  if (usage && onUsage) onUsage(usage);
   return parseCritique(text);
 }
 

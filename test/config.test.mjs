@@ -186,6 +186,15 @@ test("resolveConfig: citation verification on by default, env/flag toggle", () =
   );
 });
 
+test("resolveConfig: cost summary on by default; flag/env disable", () => {
+  assert.equal(resolveConfig({}, {}).costEnabled, true);
+  assert.equal(resolveConfig({ noCost: true }, {}).costEnabled, false);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_NO_COST: "1" }).costEnabled,
+    false,
+  );
+});
+
 test("parseUnitFloat: rejects out-of-range and non-numeric, accepts 0..1", () => {
   assert.equal(parseUnitFloat("0"), 0);
   assert.equal(parseUnitFloat("1"), 1);

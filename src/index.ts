@@ -46,6 +46,19 @@ export { resolveConfig, type RuntimeConfig, type CLIFlags } from "./config.js";
 export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";
 export { runConcurrent } from "./concurrency.js";
 export {
+  priceFor,
+  estimateCost,
+  formatCostLine,
+  formatUsd,
+  formatTokens,
+  looksLikeDario,
+  PRICE_TABLE,
+  DARIO_DEFAULT_BASE_URL,
+  type ModelPrice,
+  type TokenUsage,
+  type CostEstimate,
+} from "./pricing.js";
+export {
   verifyCitations,
   splitSentences,
   extractCiteIds,

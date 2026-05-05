@@ -20,6 +20,7 @@ export interface RuntimeConfig {
   verifyCitations: boolean;
   citeMinRecall: number;
   strictCitations: boolean;
+  costEnabled: boolean;
   jsonOutput: boolean;
   streamEnabled: boolean;
   verbose: boolean;
@@ -45,6 +46,7 @@ export interface CLIFlags {
   noVerifyCites?: boolean;
   strictCites?: boolean;
   citeMinRecall?: number;
+  noCost?: boolean;
   json?: boolean;
   noStream?: boolean;
   verbose?: boolean;
@@ -149,6 +151,8 @@ export function resolveConfig(
     flags.citeMinRecall ??
     parseUnitFloat(env.DEEPDIVE_CITE_MIN_RECALL) ??
     0.4;
+
+  const costEnabled = !(flags.noCost ?? env.DEEPDIVE_NO_COST === "1");
   const jsonOutput = flags.json ?? env.DEEPDIVE_JSON === "1";
   const streamOptOut = flags.noStream ?? env.DEEPDIVE_NO_STREAM === "1";
   // Streaming is on by default but gets auto-disabled for:
@@ -184,6 +188,7 @@ export function resolveConfig(
     verifyCitations,
     citeMinRecall,
     strictCitations,
+    costEnabled,
     jsonOutput,
     streamEnabled,
     verbose,

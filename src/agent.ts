@@ -21,6 +21,7 @@ import {
   DEFAULT_CITE_MIN_RECALL,
   type VerificationReport,
 } from "./verify.js";
+import { estimateCost, type CostEstimate } from "./pricing.js";
 import type { PageCache } from "./cache.js";
 import { runConcurrent } from "./concurrency.js";
 import {
@@ -58,6 +59,10 @@ export interface AgentConfig {
   // when verifyCitations === false. Threshold defaults to 0.4.
   verifyCitations?: boolean;
   citeMinRecall?: number;
+  // Environment passed through to pricing.ts for the unknown-model
+  // override case (DEEPDIVE_PRICE_INPUT_PER_MTOK / _OUTPUT_PER_MTOK).
+  // Defaults to undefined — the price table covers known models.
+  env?: Record<string, string | undefined>;
   onEvent?: (event: AgentEvent) => void;
   // Fires for each SSE token emitted by the synthesizer. When set, the agent
   // uses the streaming LLM path for synthesize() calls. CLI callers enable
@@ -86,7 +91,14 @@ export type AgentEvent =
   | { type: "synthesize.done"; round: number }
   | { type: "critique.start"; round: number }
   | { type: "critique.done"; round: number; critique: Critique }
-  | { type: "verify.done"; report: VerificationReport };
+  | { type: "verify.done"; report: VerificationReport }
+  | {
+      type: "llm.call";
+      phase: "plan" | "synth" | "critique";
+      round: number;
+      inputTokens: number;
+      outputTokens: number;
+    };
 
 export interface RoundTrace {
   round: number;
@@ -105,6 +117,7 @@ export interface AgentResult {
   markdown: string;
   rounds: RoundTrace[];
   verification?: VerificationReport;
+  cost: CostEstimate;
   usage: {
     queries: number;
     fetched: number;
@@ -113,6 +126,12 @@ export interface AgentResult {
     cacheHits: number;
     citationsTotal: number;
     citationsSupported: number;
+    llm: {
+      inputTokens: number;
+      outputTokens: number;
+      calls: number;
+    };
+    estimatedCostUsd: number;
   };
 }
 
@@ -123,8 +142,24 @@ export async function runAgent(
   config: AgentConfig,
   signal?: AbortSignal,
 ): Promise<AgentResult> {
+  const llmTotals = { inputTokens: 0, outputTokens: 0, calls: 0 };
+  const usageSinkFor =
+    (phase: "plan" | "synth" | "critique", round: number) =>
+    (u: { input_tokens: number; output_tokens: number }) => {
+      llmTotals.inputTokens += u.input_tokens ?? 0;
+      llmTotals.outputTokens += u.output_tokens ?? 0;
+      llmTotals.calls += 1;
+      emit(config, {
+        type: "llm.call",
+        phase,
+        round,
+        inputTokens: u.input_tokens ?? 0,
+        outputTokens: u.output_tokens ?? 0,
+      });
+    };
+
   emit(config, { type: "plan.start", question });
-  const plan = await planQueries(question, config.llm, signal);
+  const plan = await planQueries(question, config.llm, signal, usageSinkFor("plan", 0));
   emit(config, { type: "plan.done", plan });
 
   const seenUrls = new Set<string>();
@@ -220,6 +255,7 @@ export async function runAgent(
         config.llm,
         signal,
         tokenSink,
+        usageSinkFor("synth", round),
       );
       emit(config, { type: "synthesize.done", round });
 
@@ -240,6 +276,7 @@ export async function runAgent(
           allQueries,
           config.llm,
           signal,
+          usageSinkFor("critique", round),
         );
         emit(config, { type: "critique.done", round, critique: crit });
         roundTrace.critique = crit;
@@ -273,6 +310,8 @@ export async function runAgent(
     emit(config, { type: "verify.done", report: verification });
   }
 
+  const cost = estimateCost(llmTotals, config.llm.model, config.env);
+
   return {
     question,
     plan,
@@ -281,6 +320,7 @@ export async function runAgent(
     markdown,
     rounds,
     verification,
+    cost,
     usage: {
       queries: allQueries.length,
       fetched: rounds.reduce((sum, r) => sum + r.fetched, 0),
@@ -289,6 +329,8 @@ export async function runAgent(
       cacheHits: config.cache?.hits ?? 0,
       citationsTotal: verification?.totalCitations ?? 0,
       citationsSupported: verification?.supportedCitations ?? 0,
+      llm: { ...llmTotals },
+      estimatedCostUsd: cost.amountUsd,
     },
   };
 }
