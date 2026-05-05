@@ -16,6 +16,11 @@ import { BrowserSession, type BrowserOptions, type FetchedPage } from "./browser
 import { extractContent } from "./extract.js";
 import { buildSourceTable, renderAnswerMarkdown, type Source } from "./citations.js";
 import { synthesize, type SourceWithContent } from "./synthesize.js";
+import {
+  verifyCitations as runVerify,
+  DEFAULT_CITE_MIN_RECALL,
+  type VerificationReport,
+} from "./verify.js";
 import type { PageCache } from "./cache.js";
 import { runConcurrent } from "./concurrency.js";
 import {
@@ -49,6 +54,10 @@ export interface AgentConfig {
   respectRobots?: boolean;
   robotsUserAgent?: string;
   robotsCache?: RobotsCache;
+  // Citation verification — runs once after the final synthesis. Disabled
+  // when verifyCitations === false. Threshold defaults to 0.4.
+  verifyCitations?: boolean;
+  citeMinRecall?: number;
   onEvent?: (event: AgentEvent) => void;
   // Fires for each SSE token emitted by the synthesizer. When set, the agent
   // uses the streaming LLM path for synthesize() calls. CLI callers enable
@@ -76,7 +85,8 @@ export type AgentEvent =
   | { type: "synthesize.start"; sourceCount: number; round: number }
   | { type: "synthesize.done"; round: number }
   | { type: "critique.start"; round: number }
-  | { type: "critique.done"; round: number; critique: Critique };
+  | { type: "critique.done"; round: number; critique: Critique }
+  | { type: "verify.done"; report: VerificationReport };
 
 export interface RoundTrace {
   round: number;
@@ -94,12 +104,15 @@ export interface AgentResult {
   answer: string;
   markdown: string;
   rounds: RoundTrace[];
+  verification?: VerificationReport;
   usage: {
     queries: number;
     fetched: number;
     kept: number;
     rounds: number;
     cacheHits: number;
+    citationsTotal: number;
+    citationsSupported: number;
   };
 }
 
@@ -252,6 +265,14 @@ export async function runAgent(
 
   const markdown = renderAnswerMarkdown(question, answer, keptSources);
 
+  let verification: VerificationReport | undefined;
+  if (config.verifyCitations !== false && answer) {
+    verification = runVerify(answer, keptSources, {
+      threshold: config.citeMinRecall ?? DEFAULT_CITE_MIN_RECALL,
+    });
+    emit(config, { type: "verify.done", report: verification });
+  }
+
   return {
     question,
     plan,
@@ -259,12 +280,15 @@ export async function runAgent(
     answer,
     markdown,
     rounds,
+    verification,
     usage: {
       queries: allQueries.length,
       fetched: rounds.reduce((sum, r) => sum + r.fetched, 0),
       kept: keptSources.length,
       rounds: rounds.length,
       cacheHits: config.cache?.hits ?? 0,
+      citationsTotal: verification?.totalCitations ?? 0,
+      citationsSupported: verification?.supportedCitations ?? 0,
     },
   };
 }

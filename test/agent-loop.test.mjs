@@ -342,6 +342,75 @@ test("agent: maxSources caps the kept-source count", async () => {
   }
 });
 
+test("agent: verification report flags a synthesized cite missing from source", async () => {
+  // Source content is the LOREM rate-limit prose. Synth output cites [1] for
+  // a sentence whose content tokens (jellyfish, mongoose) appear nowhere in
+  // the source — so the verifier should flag it.
+  const planJson = '{"queries":["q1"]}';
+  const synthText =
+    "The system uses a jellyfish-mongoose protocol for backpressure [1].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/a", title: "A", snippet: "" }],
+  });
+  const pages = { "https://ex.com/a": { text: LOREM, title: "A" } };
+
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.ok(result.verification, "verification report attached to result");
+    assert.equal(result.verification.totalCitations, 1);
+    assert.equal(result.verification.supportedCitations, 0);
+    assert.equal(result.verification.unsupported.length, 1);
+    assert.equal(result.usage.citationsTotal, 1);
+    assert.equal(result.usage.citationsSupported, 0);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: verifyCitations: false skips verification entirely", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Anything at all [1].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/a", title: "A", snippet: "" }],
+  });
+  const pages = { "https://ex.com/a": { text: LOREM, title: "A" } };
+
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      verifyCitations: false,
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.equal(result.verification, undefined);
+    assert.equal(result.usage.citationsTotal, 0);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("agent: survives a failed fetch (mock 500) without crashing", async () => {
   const planJson = '{"queries":["q1"]}';
   const synth = "Answer [1].";

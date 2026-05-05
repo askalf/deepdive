@@ -17,6 +17,9 @@ export interface RuntimeConfig {
   concurrency: number;
   cache: { enabled: boolean; dir: string; ttlMs: number };
   respectRobots: boolean;
+  verifyCitations: boolean;
+  citeMinRecall: number;
+  strictCitations: boolean;
   jsonOutput: boolean;
   streamEnabled: boolean;
   verbose: boolean;
@@ -39,6 +42,9 @@ export interface CLIFlags {
   noCache?: boolean;
   cacheTtlMs?: number;
   ignoreRobots?: boolean;
+  noVerifyCites?: boolean;
+  strictCites?: boolean;
+  citeMinRecall?: number;
   json?: boolean;
   noStream?: boolean;
   verbose?: boolean;
@@ -134,6 +140,15 @@ export function resolveConfig(
 
   const respectRobots =
     !(flags.ignoreRobots ?? env.DEEPDIVE_IGNORE_ROBOTS === "1");
+
+  const verifyCitations =
+    !(flags.noVerifyCites ?? env.DEEPDIVE_NO_VERIFY_CITES === "1");
+  const strictCitations =
+    flags.strictCites ?? env.DEEPDIVE_STRICT_CITES === "1";
+  const citeMinRecall =
+    flags.citeMinRecall ??
+    parseUnitFloat(env.DEEPDIVE_CITE_MIN_RECALL) ??
+    0.4;
   const jsonOutput = flags.json ?? env.DEEPDIVE_JSON === "1";
   const streamOptOut = flags.noStream ?? env.DEEPDIVE_NO_STREAM === "1";
   // Streaming is on by default but gets auto-disabled for:
@@ -166,6 +181,9 @@ export function resolveConfig(
     concurrency,
     cache: { enabled: cacheEnabled, dir: cacheDir, ttlMs: cacheTtlMs },
     respectRobots,
+    verifyCitations,
+    citeMinRecall,
+    strictCitations,
     jsonOutput,
     streamEnabled,
     verbose,
@@ -189,5 +207,16 @@ export function parseNonNegativeInt(s: string | undefined): number | undefined {
   if (!/^\d+$/.test(trimmed)) return undefined;
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
+}
+
+// Exported for unit tests. Parses a float in [0, 1] — the citation-recall
+// threshold. Returns undefined for non-numeric or out-of-range input.
+export function parseUnitFloat(s: string | undefined): number | undefined {
+  if (!s) return undefined;
+  const trimmed = s.trim();
+  if (!/^\d+(\.\d+)?$|^\.\d+$/.test(trimmed)) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0 || n > 1) return undefined;
   return n;
 }

@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-05
+
+Adds **lexical citation verification**: every `[N]` reference in a synthesized answer is now checked against the extracted text of source N before the markdown is finalized, catching the dominant failure mode of cited-answer tools (confident sentences pointing at sources that don't actually support them).
+
+### Added — citation verifier (`src/verify.ts`, ~150 lines, no new runtime deps)
+
+After the final synthesis, the agent splits the answer body into sentences, extracts every `[N]` citation, and computes the fraction of distinct content tokens in the claim that appear in source N's extracted text. Stop-words are dropped; numbers and digit-letter compounds (`5h`, `7d`) are preserved as the strongest hallucination-tell anchors. A multi-cite sentence (`[1][3]`) is supported only when **every** cited source clears the threshold — a bogus `[3]` in an otherwise-true sentence is still flagged.
+
+- New module `src/verify.ts` exporting `verifyCitations`, `splitSentences`, `extractCiteIds`, `contentTokens`, `recall`, `stripSourcesBlock`, and `DEFAULT_CITE_MIN_RECALL`. All pure — no LLM, no network, no disk.
+- New CLI flags: `--strict-cites` (exit non-zero on any unsupported citation), `--cite-min-recall=<0..1>` (threshold knob, default `0.4`), `--no-verify-cites` (skip the pass entirely).
+- Env vars: `DEEPDIVE_STRICT_CITES`, `DEEPDIVE_CITE_MIN_RECALL`, `DEEPDIVE_NO_VERIFY_CITES`.
+- New agent event `verify.done` with the full report; renders one summary line in `--verbose` plus one warning line per unsupported sentence. Clean runs stay quiet.
+- `AgentResult.verification: VerificationReport | undefined` and `AgentResult.usage.{citationsTotal, citationsSupported}` added for library consumers.
+- `--json` payload now includes a `verification` key.
+- When any citation fails, the markdown output gets a `## Citation health` footer at the end. Clean answers are unchanged.
+
+```bash
+# Routine use — verifier runs by default, only complains when something's off:
+deepdive "how does claude's rate limiter work" --deep --verbose
+
+# CI / scripted use — fail the build if any citation is unsupported:
+deepdive "..." --strict-cites --cite-min-recall=0.5
+```
+
+What it is not: a semantic judge. Lexical recall has high precision on hallucinated proper nouns, dates, and numbers but can flag paraphrased-but-truthful sentences below threshold and miss topic-aligned-but-incorrect ones above it. Adding a second LLM "judge" pass would reintroduce exactly the hallucination class we're trying to detect, so v1 sticks to deterministic lexical scoring.
+
+39 new tests across `test/verify.test.mjs` (pure-function coverage of all five exported helpers + the integration shape), plus 2 new agent-loop integration tests (verifies the bogus-cite flag end-to-end and confirms `verifyCitations: false` skips), plus 4 new CLI/config tests covering the flag plumbing. Total test footprint now 251 across 5 suites.
+
 ## [0.4.0] - 2026-05-02
 
 Adds **Exa** as a fifth search adapter alongside DuckDuckGo, SearXNG, Brave, and Tavily — the first community-contributed adapter ([@tgonzalezc5](https://github.com/tgonzalezc5), [#19](https://github.com/askalf/deepdive/pull/19)). This release also exercises the `auto-release.yml` inline-publish chain end-to-end for the first time (the latent bug fixed in v0.3.0's CHANGELOG entry).

@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveConfig, parsePositiveInt, parseNonNegativeInt } from "../dist/config.js";
+import {
+  resolveConfig,
+  parsePositiveInt,
+  parseNonNegativeInt,
+  parseUnitFloat,
+} from "../dist/config.js";
 
 test("resolveConfig: defaults map to dario at localhost:3456", () => {
   const c = resolveConfig({}, {});
@@ -155,4 +160,39 @@ test("resolveConfig: llm.maxAttempts defaults to 3, env + flag override", () => 
     5,
   );
   assert.equal(resolveConfig({ llmAttempts: 1 }, {}).llm.maxAttempts, 1);
+});
+
+test("resolveConfig: citation verification on by default, env/flag toggle", () => {
+  assert.equal(resolveConfig({}, {}).verifyCitations, true);
+  assert.equal(resolveConfig({}, {}).strictCitations, false);
+  assert.equal(resolveConfig({}, {}).citeMinRecall, 0.4);
+  assert.equal(
+    resolveConfig({ noVerifyCites: true }, {}).verifyCitations,
+    false,
+  );
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_NO_VERIFY_CITES: "1" }).verifyCitations,
+    false,
+  );
+  assert.equal(resolveConfig({ strictCites: true }, {}).strictCitations, true);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_STRICT_CITES: "1" }).strictCitations,
+    true,
+  );
+  assert.equal(resolveConfig({ citeMinRecall: 0.7 }, {}).citeMinRecall, 0.7);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_CITE_MIN_RECALL: "0.25" }).citeMinRecall,
+    0.25,
+  );
+});
+
+test("parseUnitFloat: rejects out-of-range and non-numeric, accepts 0..1", () => {
+  assert.equal(parseUnitFloat("0"), 0);
+  assert.equal(parseUnitFloat("1"), 1);
+  assert.equal(parseUnitFloat("0.5"), 0.5);
+  assert.equal(parseUnitFloat(".25"), 0.25);
+  assert.equal(parseUnitFloat("2"), undefined);
+  assert.equal(parseUnitFloat("-0.1"), undefined);
+  assert.equal(parseUnitFloat("abc"), undefined);
+  assert.equal(parseUnitFloat(undefined), undefined);
 });
