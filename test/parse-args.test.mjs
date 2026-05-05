@@ -145,3 +145,8 @@ test("parseArgs: --cite-min-recall=2 (out of range) yields undefined", () => {
   const p = parseArgs(["q", "--cite-min-recall=2"]);
   assert.equal(p.flags.citeMinRecall, undefined);
 });
+
+test("parseArgs: --no-cost flag", () => {
+  const p = parseArgs(["q", "--no-cost"]);
+  assert.equal(p.flags.noCost, true);
+});

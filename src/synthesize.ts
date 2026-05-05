@@ -5,9 +5,10 @@
 // When `onToken` is provided, uses the streaming variant so tokens land in
 // front of the user as the model writes them instead of after a 30+s wait.
 
-import { callLLM, type LLMConfig } from "./llm.js";
+import { callLLM, type LLMConfig, type LLMResult } from "./llm.js";
 import { callLLMStream } from "./llm-stream.js";
 import type { Source } from "./citations.js";
+import type { UsageSink } from "./plan.js";
 
 export interface SourceWithContent extends Source {
   content: string;
@@ -35,6 +36,7 @@ export async function synthesize(
   config: LLMConfig,
   signal?: AbortSignal,
   onToken?: (text: string) => void,
+  onUsage?: UsageSink,
 ): Promise<string> {
   if (sources.length === 0) {
     return "_No sources could be fetched or extracted. Unable to answer._";
@@ -45,18 +47,20 @@ export async function synthesize(
     `Sources (${sources.length}):\n\n${packet}\n\n` +
     `Write the cited markdown answer now.`;
   const messages = [{ role: "user" as const, content: userMessage }];
+  let result: LLMResult;
   if (onToken) {
-    const { text } = await callLLMStream(
+    result = await callLLMStream(
       messages,
       SYNTH_SYSTEM,
       config,
       { onToken },
       signal,
     );
-    return text;
+  } else {
+    result = await callLLM(messages, SYNTH_SYSTEM, config, signal);
   }
-  const { text } = await callLLM(messages, SYNTH_SYSTEM, config, signal);
-  return text;
+  if (result.usage && onUsage) onUsage(result.usage);
+  return result.text;
 }
 
 // Exported for unit tests.

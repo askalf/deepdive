@@ -12,8 +12,10 @@ import { join } from "node:path";
 import { runAgent } from "../dist/agent.js";
 import { createCache } from "../dist/cache.js";
 
-function makeLLMServer(responseQueue) {
+function makeLLMServer(responseQueue, usageQueue) {
   // responseQueue: array of strings to hand out in order, one per request.
+  // usageQueue (optional): per-call {input_tokens, output_tokens}; defaults
+  // to {10,10} when not provided so existing tests keep working.
   const calls = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -22,13 +24,14 @@ function makeLLMServer(responseQueue) {
       const parsed = JSON.parse(body);
       calls.push({ system: parsed.system, messages: parsed.messages });
       const text = responseQueue.shift() ?? "(no more canned responses)";
+      const usage = usageQueue?.shift() ?? { input_tokens: 10, output_tokens: 10 };
       const payload = {
         id: "msg_test",
         type: "message",
         role: "assistant",
         model: parsed.model,
         content: [{ type: "text", text }],
-        usage: { input_tokens: 10, output_tokens: 10 },
+        usage,
       };
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(payload));
@@ -406,6 +409,137 @@ test("agent: verifyCitations: false skips verification entirely", async () => {
     });
     assert.equal(result.verification, undefined);
     assert.equal(result.usage.citationsTotal, 0);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: accumulates LLM usage across plan + synth + critique calls", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synth1 = "Draft [1].";
+  const critiqueJson = '{"done": false, "queries": ["q2"]}';
+  const synth2 = "Final [1][2].";
+  // 4 calls total: plan (100/20), synth (300/80), critique (50/30), synth (350/100)
+  // totals: input 800, output 230
+  // For claude-sonnet-4-6 (3/15 per MTok):
+  //   800 * 3 / 1e6 = 0.0024
+  //   230 * 15 / 1e6 = 0.00345
+  //   total = 0.00585
+  const usageQueue = [
+    { input_tokens: 100, output_tokens: 20 },
+    { input_tokens: 300, output_tokens: 80 },
+    { input_tokens: 50, output_tokens: 30 },
+    { input_tokens: 350, output_tokens: 100 },
+  ];
+  const { server } = makeLLMServer(
+    [planJson, synth1, critiqueJson, synth2],
+    usageQueue,
+  );
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/1", title: "1", snippet: "" }],
+    q2: [{ url: "https://ex.com/2", title: "2", snippet: "" }],
+  });
+  const pages = {
+    "https://ex.com/1": { text: LOREM, title: "1" },
+    "https://ex.com/2": { text: LOREM, title: "2" },
+  };
+
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 1,
+      concurrency: 2,
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.equal(result.usage.llm.calls, 4);
+    assert.equal(result.usage.llm.inputTokens, 800);
+    assert.equal(result.usage.llm.outputTokens, 230);
+    // Cost math at sonnet pricing (3/15 per MTok)
+    assert.ok(
+      Math.abs(result.usage.estimatedCostUsd - 0.00585) < 1e-9,
+      `expected ~$0.00585, got ${result.usage.estimatedCostUsd}`,
+    );
+    assert.equal(result.cost.knownModel, true);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: emits llm.call events with phase + token counts", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1].";
+  const usageQueue = [
+    { input_tokens: 11, output_tokens: 22 },
+    { input_tokens: 33, output_tokens: 44 },
+  ];
+  const { server } = makeLLMServer([planJson, synthText], usageQueue);
+  const baseUrl = await startServer(server);
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/a", title: "A", snippet: "" }],
+  });
+  const pages = { "https://ex.com/a": { text: LOREM, title: "A" } };
+
+  const events = [];
+  try {
+    await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      browserFactory: mockBrowserFactory(pages),
+      onEvent: (e) => {
+        if (e.type === "llm.call") events.push(e);
+      },
+    });
+    assert.equal(events.length, 2);
+    assert.equal(events[0].phase, "plan");
+    assert.equal(events[0].inputTokens, 11);
+    assert.equal(events[0].outputTokens, 22);
+    assert.equal(events[1].phase, "synth");
+    assert.equal(events[1].inputTokens, 33);
+    assert.equal(events[1].outputTokens, 44);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: unknown model yields knownModel=false and amountUsd=0", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/a", title: "A", snippet: "" }],
+  });
+  const pages = { "https://ex.com/a": { text: LOREM, title: "A" } };
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "self-hosted-mystery", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.equal(result.cost.knownModel, false);
+    assert.equal(result.cost.amountUsd, 0);
+    // Tokens still accumulate even when there's no price.
+    assert.ok(result.usage.llm.inputTokens > 0);
+    assert.ok(result.usage.llm.outputTokens > 0);
   } finally {
     await stopServer(server);
   }

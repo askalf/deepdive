@@ -19,6 +19,11 @@ import { createCache } from "./cache.js";
 import { renderSourcesMarkdown } from "./citations.js";
 import type { VerificationReport } from "./verify.js";
 import {
+  formatCostLine,
+  looksLikeDario,
+  type CostEstimate,
+} from "./pricing.js";
+import {
   runDoctor,
   renderDoctorText,
   renderDoctorJson,
@@ -57,6 +62,7 @@ Flags:
   --no-verify-cites             Skip lexical citation verification (default: on)
   --strict-cites                Exit non-zero if any citation is unsupported
   --cite-min-recall=<0..1>      Threshold for citation support. Default: 0.4
+  --no-cost                     Suppress the end-of-run cost summary on stderr
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
   --verbose, -v                 Stream progress events to stderr
@@ -72,7 +78,8 @@ Environment:
   DEEPDIVE_DEEP_ROUNDS, DEEPDIVE_CONCURRENCY, DEEPDIVE_NO_CACHE,
   DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE,
   DEEPDIVE_LLM_TIMEOUT_MS, DEEPDIVE_LLM_ATTEMPTS,
-  DEEPDIVE_NO_VERIFY_CITES, DEEPDIVE_STRICT_CITES, DEEPDIVE_CITE_MIN_RECALL
+  DEEPDIVE_NO_VERIFY_CITES, DEEPDIVE_STRICT_CITES, DEEPDIVE_CITE_MIN_RECALL,
+  DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK
 `;
 
 interface ParsedArgs {
@@ -112,6 +119,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--strict-cites") {
       flags.strictCites = true;
+      continue;
+    }
+    if (a === "--no-cost") {
+      flags.noCost = true;
       continue;
     }
     if (a === "--json") {
@@ -263,11 +274,26 @@ function renderEvent(e: AgentEvent): string {
       }
       return lines.join("\n");
     }
+    case "llm.call":
+      return `  llm     ${e.phase.padEnd(8)} ${e.inputTokens} in / ${e.outputTokens} out`;
   }
 }
 
 function ellipsize(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
+}
+
+// Renders the end-of-run cost summary line for stderr. Two-line variant
+// when the LLM endpoint looks like dario (the "$0 on Max" hint applies),
+// one-line otherwise. Exported for unit tests.
+export function renderCostSummary(
+  cost: CostEstimate,
+  model: string,
+  baseUrl: string,
+): string {
+  const head = "cost · " + formatCostLine(cost, model);
+  if (!looksLikeDario(baseUrl)) return head;
+  return head + "\n       (≈ at API list price; $0 on Claude Max via dario)";
 }
 
 // Renders a small markdown footer when the verification report has any
@@ -367,6 +393,7 @@ async function main(argv: string[]): Promise<number> {
         respectRobots: config.respectRobots,
         verifyCitations: config.verifyCitations,
         citeMinRecall: config.citeMinRecall,
+        env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
         },
@@ -385,6 +412,14 @@ async function main(argv: string[]): Promise<number> {
       config.strictCitations &&
       (result.verification?.unsupported.length ?? 0) > 0;
 
+    // Cost summary lands on stderr regardless of stdout mode (suppressed by
+    // --no-cost / DEEPDIVE_NO_COST=1, and skipped for --json since the data
+    // is in the JSON envelope already).
+    const costLine =
+      config.costEnabled && !config.jsonOutput
+        ? renderCostSummary(result.cost, config.llm.model, config.llm.baseUrl)
+        : "";
+
     if (streaming && streamed) {
       // Streaming mode already wrote the header + answer tokens. Close with
       // the sources block, optional citation-health footer, and (if
@@ -397,6 +432,7 @@ async function main(argv: string[]): Promise<number> {
         writeFileSync(path, result.markdown + citeFooter, "utf-8");
         process.stderr.write(`\nwrote ${path}\n`);
       }
+      if (costLine) process.stderr.write(costLine + "\n");
       return strictFail ? 1 : 0;
     }
 
@@ -414,6 +450,7 @@ async function main(argv: string[]): Promise<number> {
             })),
             answer: result.answer,
             verification: result.verification,
+            cost: result.cost,
             usage: result.usage,
           },
           null,
@@ -430,6 +467,7 @@ async function main(argv: string[]): Promise<number> {
       writeFileSync(path, output, "utf-8");
       process.stderr.write(`\nwrote ${path}\n`);
     }
+    if (costLine) process.stderr.write(costLine + "\n");
     return strictFail ? 1 : 0;
   } catch (err) {
     process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
