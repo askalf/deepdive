@@ -206,11 +206,25 @@ function normalizeForDedup(line: string): string {
 }
 
 function collapseWhitespace(s: string): string {
-  return s
-    .replace(/[ \t\f\v]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  // Per-line normalization avoids the polynomial backtracking that
+  // ` *\n */g` would do on inputs with long horizontal whitespace
+  // runs and no newlines (CodeQL flagged the earlier form). Every
+  // operation here is single-pass linear: split → trim → filter.
+  const lines = s.split(/\r?\n/).map((line) =>
+    line.replace(/[ \t\f\v]+/g, " ").trim(),
+  );
+  const out: string[] = [];
+  let blanks = 0;
+  for (const line of lines) {
+    if (line === "") {
+      blanks++;
+      if (blanks <= 1) out.push("");
+    } else {
+      blanks = 0;
+      out.push(line);
+    }
+  }
+  return out.join("\n").trim();
 }
 
 // Returns true when the URL or content-type plausibly points at a PDF.

@@ -146,21 +146,44 @@ export async function expandPaths(inputs: string[]): Promise<string[]> {
 
 // Exported for unit tests. Minimal HTML→text — drops <script>/<style>
 // and tags, decodes a small set of entities. The browser's text
-// extraction is far better; this is for offline files only.
+// extraction is far better; this is for offline files only (not for
+// sanitizing untrusted input).
 export function stripTags(html: string): string {
   return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ")
+    // Lazy match with optional whitespace before the closing > so we
+    // catch </script > and </script\n> variants. CodeQL flagged the
+    // previous greedy-with-lookahead pattern as a bad-HTML-filtering
+    // regexp; we accept the offline-trusted-input scope and use a
+    // simpler bounded form.
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
+    // Single-pass entity decode. Sequential .replace() calls would
+    // double-unescape "&amp;lt;" to "<"; one pass over the original
+    // string preserves the literal that the author wrote.
+    .replace(/&(?:amp|lt|gt|quot|nbsp|#39);/gi, decodeEntity)
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function decodeEntity(match: string): string {
+  switch (match.toLowerCase()) {
+    case "&amp;":
+      return "&";
+    case "&lt;":
+      return "<";
+    case "&gt;":
+      return ">";
+    case "&quot;":
+      return '"';
+    case "&nbsp;":
+      return " ";
+    case "&#39;":
+      return "'";
+    default:
+      return match;
+  }
 }
 
 // Word-cap, mirrors what extract.ts does for web sources.

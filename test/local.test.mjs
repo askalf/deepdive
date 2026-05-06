@@ -36,6 +36,24 @@ test("stripTags: drops HTML comments", () => {
   assert.equal(stripTags("<!-- secret -->visible"), "visible");
 });
 
+test("stripTags: matches </script > with whitespace before the close bracket", () => {
+  // The previous regex required `</script>` exactly; CodeQL flagged this
+  // as a bad-HTML-filtering pattern because </script > and </script\n>
+  // would slip through. Now we tolerate \s* before the >.
+  const html =
+    "<p>before</p><script>alert(1)</script ><p>after</p>";
+  const out = stripTags(html);
+  assert.match(out, /before/);
+  assert.match(out, /after/);
+  assert.doesNotMatch(out, /alert/);
+});
+
+test("stripTags: does NOT double-unescape &amp;lt;", () => {
+  // Sequential .replace() would turn "&amp;lt;" → "&lt;" → "<".
+  // The single-pass decode preserves the literal the author wrote.
+  assert.equal(stripTags("<p>&amp;lt;tag&amp;gt;</p>"), "&lt;tag&gt;");
+});
+
 // ── expandPaths ─────────────────────────────────────────────────────────────
 
 test("expandPaths: dedupes inputs", async () => {
