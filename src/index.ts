@@ -52,12 +52,32 @@ export {
   formatUsd,
   formatTokens,
   looksLikeDario,
+  daysAgo,
   PRICE_TABLE,
+  PRICE_TABLE_VERIFIED_AT,
+  PRICE_TABLE_STALE_AFTER_DAYS,
   DARIO_DEFAULT_BASE_URL,
   type ModelPrice,
   type TokenUsage,
   type CostEstimate,
 } from "./pricing.js";
+export {
+  extractPdfText,
+  isPdfExtractorAvailable,
+  looksLikePdf,
+  joinTextItems,
+  dedupeRunningHeadersFooters,
+  PdfExtractorMissingError,
+  type PdfExtractOptions,
+  type PdfExtractResult,
+} from "./pdf.js";
+export {
+  ingestLocalPaths,
+  expandPaths,
+  stripTags,
+  type LocalIngestOptions,
+  type LocalIngestResult,
+} from "./local.js";
 export {
   verifyCitations,
   splitSentences,

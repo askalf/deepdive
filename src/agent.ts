@@ -22,6 +22,12 @@ import {
   type VerificationReport,
 } from "./verify.js";
 import { estimateCost, type CostEstimate } from "./pricing.js";
+import {
+  extractPdfText,
+  PdfExtractorMissingError,
+  looksLikePdf,
+} from "./pdf.js";
+import { ingestLocalPaths } from "./local.js";
 import type { PageCache } from "./cache.js";
 import { runConcurrent } from "./concurrency.js";
 import {
@@ -59,6 +65,12 @@ export interface AgentConfig {
   // when verifyCitations === false. Threshold defaults to 0.4.
   verifyCitations?: boolean;
   citeMinRecall?: number;
+  // PDF extraction — page cap shared between web-fetched PDFs and local
+  // PDFs ingested via include[]. Defaults to 50.
+  pdfMaxPages?: number;
+  // Local files / dirs to ingest as pre-fetched sources. PDFs in this
+  // list need pdfjs-dist installed; missing module → file is skipped.
+  include?: string[];
   // Environment passed through to pricing.ts for the unknown-model
   // override case (DEEPDIVE_PRICE_INPUT_PER_MTOK / _OUTPUT_PER_MTOK).
   // Defaults to undefined — the price table covers known models.
@@ -86,7 +98,8 @@ export type AgentEvent =
       words: number;
       cached: boolean;
     }
-  | { type: "fetch.skipped"; url: string; reason: "robots" }
+  | { type: "fetch.skipped"; url: string; reason: "robots" | "pdf-no-extractor" }
+  | { type: "include.done"; ingested: number; skipped: number }
   | { type: "synthesize.start"; sourceCount: number; round: number }
   | { type: "synthesize.done"; round: number }
   | { type: "critique.start"; round: number }
@@ -168,6 +181,26 @@ export async function runAgent(
   const keptSources: SourceWithContent[] = [];
   const rounds: RoundTrace[] = [];
 
+  // Local file ingestion: pre-fetched sources are placed at the head of
+  // the kept-sources list so they get the lowest [N] citation ids and
+  // are most prominent to the synthesizer.
+  if (config.include && config.include.length > 0) {
+    const local = await ingestLocalPaths(config.include, {
+      pdfMaxPages: config.pdfMaxPages,
+      maxWordsPerSource: config.maxWordsPerSource,
+    });
+    for (const s of local.sources) {
+      if (keptSources.length >= config.maxSources) break;
+      keptSources.push({ id: keptSources.length + 1, ...s });
+      seenUrls.add(s.url);
+    }
+    emit(config, {
+      type: "include.done",
+      ingested: local.sources.length,
+      skipped: local.skipped.length,
+    });
+  }
+
   let browser: BrowserLike | null = null;
   let answer = "";
   const makeBrowser =
@@ -223,22 +256,59 @@ export async function runAgent(
 
       for (const f of fetched) {
         if (keptSources.length >= config.maxSources) break;
-        if (f.page.status >= 200 && f.page.status < 400 && f.words > 50) {
-          const sourceId = keptSources.length + 1;
+        if (!(f.page.status >= 200 && f.page.status < 400)) continue;
+
+        const isPdf =
+          f.page.bytes !== undefined &&
+          looksLikePdf({
+            url: f.page.url,
+            finalUrl: f.page.finalUrl,
+            contentType: f.page.mimeType,
+          });
+
+        let content: string;
+        let title: string;
+        if (isPdf) {
+          try {
+            const result = await extractPdfText(f.page.bytes!, {
+              maxPages: config.pdfMaxPages,
+            });
+            content = result.text;
+            title = f.candidate.title || basenameFromUrl(f.page.finalUrl || f.page.url);
+          } catch (err) {
+            if (err instanceof PdfExtractorMissingError) {
+              emit(config, {
+                type: "fetch.skipped",
+                url: f.page.url,
+                reason: "pdf-no-extractor",
+              });
+            }
+            continue;
+          }
+          // Apply the same word cap as web sources.
+          const words = content.split(/\s+/).filter(Boolean);
+          if (words.length > config.maxWordsPerSource) {
+            content = words.slice(0, config.maxWordsPerSource).join(" ") + " …";
+          }
+        } else {
+          if (f.words <= 50) continue;
           const extracted = extractContent(
             f.page.text,
             f.page.title || f.candidate.title,
             config.maxWordsPerSource,
           );
           if (extracted.text.length === 0) continue;
-          keptSources.push({
-            id: sourceId,
-            url: f.page.finalUrl || f.page.url,
-            title: f.page.title || f.candidate.title,
-            fetchedAt: f.page.fetchedAt,
-            content: extracted.text,
-          });
+          content = extracted.text;
+          title = f.page.title || f.candidate.title;
         }
+
+        keptSources.push({
+          id: keptSources.length + 1,
+          url: f.page.finalUrl || f.page.url,
+          title,
+          fetchedAt: f.page.fetchedAt,
+          content,
+        });
       }
 
       emit(config, {
@@ -421,4 +491,14 @@ async function fetchOne(
 
 function emit(config: AgentConfig, event: AgentEvent): void {
   config.onEvent?.(event);
+}
+
+function basenameFromUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const last = u.pathname.split("/").filter(Boolean).pop();
+    return last ? decodeURIComponent(last) : u.host;
+  } catch {
+    return url;
+  }
 }

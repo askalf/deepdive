@@ -31,11 +31,22 @@ export interface CostEstimate {
 
 // Anthropic public list pricing as of release. Verify against
 // docs.anthropic.com/en/docs/about-claude/pricing before bumping.
+//
+// PRICE_TABLE_VERIFIED_AT records when the table was last spot-checked.
+// `deepdive doctor` warns when the table is more than ~90 days stale,
+// keeping the maintainer honest about audit cadence — drift is intentional
+// (a PR is the right way to update prices), but undeclared drift is not.
 export const PRICE_TABLE: Record<string, ModelPrice> = {
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-opus-4-7": { inputPerMTok: 15, outputPerMTok: 75 },
   "claude-haiku-4-5": { inputPerMTok: 0.8, outputPerMTok: 4 },
 };
+
+export const PRICE_TABLE_VERIFIED_AT = "2026-05-05";
+
+// Threshold in days at which doctor flips the pricing check from "ok"
+// to "warn". Exposed so tests can override.
+export const PRICE_TABLE_STALE_AFTER_DAYS = 90;
 
 // dario's default listening port — auto-detected to print the
 // "$0 on Claude Max via dario" hint without claiming it for unrelated
@@ -128,6 +139,16 @@ export function formatTokens(n: number): string {
   if (n < 10_000) return (n / 1000).toFixed(2) + "k";
   if (n < 1_000_000) return (n / 1000).toFixed(1) + "k";
   return (n / 1_000_000).toFixed(2) + "M";
+}
+
+// Whole-day delta between an ISO date string ("YYYY-MM-DD") and `now`.
+// Returns NaN for malformed input. Exported for tests.
+export function daysAgo(isoDate: string, now: number = Date.now()): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!m) return NaN;
+  const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (!Number.isFinite(t)) return NaN;
+  return Math.floor((now - t) / 86_400_000);
 }
 
 function parseDollars(s: string | undefined): number | undefined {

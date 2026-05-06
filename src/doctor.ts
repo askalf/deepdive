@@ -17,6 +17,13 @@ import type { RuntimeConfig } from "./config.js";
 import type { SearchAdapter } from "./search.js";
 import { resolveSearchAdapter } from "./search.js";
 import { trimTrailingSlashes } from "./url-util.js";
+import {
+  PRICE_TABLE,
+  PRICE_TABLE_VERIFIED_AT,
+  PRICE_TABLE_STALE_AFTER_DAYS,
+  daysAgo,
+} from "./pricing.js";
+import { isPdfExtractorAvailable } from "./pdf.js";
 
 export type CheckStatus = "ok" | "warn" | "fail" | "info";
 
@@ -57,6 +64,8 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   if (!opts.skipLLM) for (const check of await llmChecks(opts)) checks.push(check);
   if (!opts.skipSearch) for (const check of await searchChecks(opts)) checks.push(check);
   if (!opts.skipBrowser) for (const check of await browserChecks(opts)) checks.push(check);
+  for (const check of await pdfChecks(opts)) checks.push(check);
+  for (const check of await pricingChecks(opts)) checks.push(check);
 
   const summary = checks.reduce(
     (s, c) => ({ ...s, total: s.total + 1, [c.status]: s[c.status] + 1 }),
@@ -319,6 +328,42 @@ async function searchChecks(opts: DoctorOptions): Promise<CheckResult[]> {
   return out;
 }
 
+async function pdfChecks(_opts: DoctorOptions): Promise<CheckResult[]> {
+  const available = await isPdfExtractorAvailable();
+  return [
+    {
+      id: "pdf.extractor",
+      category: "pdf",
+      status: available ? "ok" : "info",
+      label: "extractor",
+      detail: available
+        ? "pdfjs-dist available"
+        : "pdfjs-dist not installed (PDF sources will be skipped) — `npm install -g pdfjs-dist`",
+    },
+  ];
+}
+
+async function pricingChecks(opts: DoctorOptions): Promise<CheckResult[]> {
+  const now = opts.now?.() ?? Date.now();
+  const days = daysAgo(PRICE_TABLE_VERIFIED_AT, now);
+  const known = Object.keys(PRICE_TABLE).length;
+  const stale = Number.isFinite(days) && days > PRICE_TABLE_STALE_AFTER_DAYS;
+  return [
+    {
+      id: "pricing.table",
+      category: "pricing",
+      status: stale ? "warn" : "ok",
+      label: "price table",
+      detail: Number.isFinite(days)
+        ? `${known} models · verified ${PRICE_TABLE_VERIFIED_AT} (${days}d ago)` +
+          (stale
+            ? ` · stale (>${PRICE_TABLE_STALE_AFTER_DAYS}d) — verify against docs.anthropic.com/en/docs/about-claude/pricing`
+            : "")
+        : `${known} models · verification date malformed`,
+    },
+  ];
+}
+
 async function browserChecks(opts: DoctorOptions): Promise<CheckResult[]> {
   const out: CheckResult[] = [];
 
@@ -393,7 +438,7 @@ export function renderDoctorText(report: DoctorReport, opts: { color?: boolean }
   const lines: string[] = [];
   lines.push(`deepdive doctor — v${report.version}`);
   lines.push("");
-  const order = ["environment", "cache", "llm", "search", "browser"];
+  const order = ["environment", "cache", "llm", "search", "browser", "pdf", "pricing"];
   const seenCategories = new Set<string>();
   const orderedCategories = [
     ...order.filter((c) => byCategory.has(c)),

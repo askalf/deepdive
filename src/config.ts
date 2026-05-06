@@ -21,6 +21,8 @@ export interface RuntimeConfig {
   citeMinRecall: number;
   strictCitations: boolean;
   costEnabled: boolean;
+  pdfMaxPages: number;
+  include: string[];
   jsonOutput: boolean;
   streamEnabled: boolean;
   verbose: boolean;
@@ -47,6 +49,8 @@ export interface CLIFlags {
   strictCites?: boolean;
   citeMinRecall?: number;
   noCost?: boolean;
+  pdfMaxPages?: number;
+  include?: string[];
   json?: boolean;
   noStream?: boolean;
   verbose?: boolean;
@@ -153,6 +157,17 @@ export function resolveConfig(
     0.4;
 
   const costEnabled = !(flags.noCost ?? env.DEEPDIVE_NO_COST === "1");
+
+  const pdfMaxPages =
+    flags.pdfMaxPages ??
+    parsePositiveInt(env.DEEPDIVE_PDF_MAX_PAGES) ??
+    50;
+
+  const includeFromEnv = (env.DEEPDIVE_INCLUDE ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const include = flags.include ?? includeFromEnv;
   const jsonOutput = flags.json ?? env.DEEPDIVE_JSON === "1";
   const streamOptOut = flags.noStream ?? env.DEEPDIVE_NO_STREAM === "1";
   // Streaming is on by default but gets auto-disabled for:
@@ -189,6 +204,8 @@ export function resolveConfig(
     citeMinRecall,
     strictCitations,
     costEnabled,
+    pdfMaxPages,
+    include,
     jsonOutput,
     streamEnabled,
     verbose,

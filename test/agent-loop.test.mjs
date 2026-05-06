@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgent } from "../dist/agent.js";
@@ -92,6 +92,8 @@ function mockBrowserFactory(pagesByUrl, tracker = { opened: 0, fetched: [] }) {
           text: page.text,
           html: page.html ?? `<html>${page.text}</html>`,
           fetchedAt: Date.now(),
+          mimeType: page.mimeType,
+          bytes: page.bytes,
         };
       },
       async close() {
@@ -540,6 +542,111 @@ test("agent: unknown model yields knownModel=false and amountUsd=0", async () =>
     // Tokens still accumulate even when there's no price.
     assert.ok(result.usage.llm.inputTokens > 0);
     assert.ok(result.usage.llm.outputTokens > 0);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: --include ingests local files as pre-fetched sources", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Combined answer [1][2].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const dir = mkdtempSync(join(tmpdir(), "deepdive-include-"));
+  try {
+    const md = join(dir, "personal-note.md");
+    writeFileSync(md, "# my notes\n\nspecific local-only fact about X");
+
+    const search = mockSearch({
+      q1: [{ url: "https://ex.com/web", title: "W", snippet: "" }],
+    });
+    const pages = { "https://ex.com/web": { text: LOREM, title: "web page" } };
+
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      include: [md],
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.equal(result.sources.length, 2, "1 local + 1 web source");
+    // Local source comes first (id=1) — most prominent to the synthesizer.
+    assert.equal(result.sources[0].title, "personal-note.md");
+    assert.match(result.sources[0].url, /^file:/);
+    assert.match(result.sources[0].content, /local-only fact about X/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    await stopServer(server);
+  }
+});
+
+test("agent: routes PDF byte responses through the PDF extractor", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  // Build a minimal valid PDF in-memory and feed it as the page bytes.
+  const enc = new TextEncoder();
+  const stream = "BT /F1 12 Tf 72 720 Td (PdfOnlyToken AbcDefGhi) Tj ET";
+  const objs = [
+    "<</Type/Catalog/Pages 2 0 R>>",
+    "<</Type/Pages/Count 1/Kids[3 0 R]>>",
+    "<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+    `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`,
+    "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>",
+  ];
+  let body = "%PDF-1.4\n%\xff\xff\xff\xff\n";
+  const offsets = [0];
+  for (let i = 0; i < objs.length; i++) {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${objs[i]}\nendobj\n`;
+  }
+  const xrefOffset = body.length;
+  body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= objs.length; i++) {
+    body += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
+  }
+  body += `trailer\n<</Size ${objs.length + 1}/Root 1 0 R>>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  const pdfBytes = enc.encode(body);
+
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/paper.pdf", title: "Paper", snippet: "" }],
+  });
+  const pages = {
+    "https://ex.com/paper.pdf": {
+      text: "",
+      title: "",
+      status: 200,
+      bytes: pdfBytes,
+      mimeType: "application/pdf",
+    },
+  };
+
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.equal(result.sources.length, 1, "PDF kept as source");
+    assert.match(
+      result.sources[0].content,
+      /PdfOnlyToken/,
+      "extracted text from the PDF reaches the synthesizer",
+    );
   } finally {
     await stopServer(server);
   }

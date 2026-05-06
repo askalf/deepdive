@@ -10,7 +10,10 @@ import {
   formatUsd,
   formatTokens,
   looksLikeDario,
+  daysAgo,
   PRICE_TABLE,
+  PRICE_TABLE_VERIFIED_AT,
+  PRICE_TABLE_STALE_AFTER_DAYS,
   DARIO_DEFAULT_BASE_URL,
 } from "../dist/pricing.js";
 
@@ -187,4 +190,32 @@ test("looksLikeDario: rejects a different host or port", () => {
   assert.equal(looksLikeDario("https://api.anthropic.com"), false);
   assert.equal(looksLikeDario("http://localhost:3000"), false);
   assert.equal(looksLikeDario("http://127.0.0.1:3456"), false);
+});
+
+// ── daysAgo / drift telemetry ───────────────────────────────────────────────
+
+test("daysAgo: same-day returns 0", () => {
+  const t = Date.UTC(2026, 4, 5);
+  assert.equal(daysAgo("2026-05-05", t), 0);
+});
+
+test("daysAgo: one day later returns 1", () => {
+  const t = Date.UTC(2026, 4, 6);
+  assert.equal(daysAgo("2026-05-05", t), 1);
+});
+
+test("daysAgo: 100 days later returns 100", () => {
+  const t = Date.UTC(2026, 4, 5) + 100 * 86400_000;
+  assert.equal(daysAgo("2026-05-05", t), 100);
+});
+
+test("daysAgo: malformed input returns NaN", () => {
+  assert.ok(Number.isNaN(daysAgo("not-a-date")));
+  assert.ok(Number.isNaN(daysAgo("2026/05/05")));
+});
+
+test("drift constants exist and are coherent", () => {
+  assert.match(PRICE_TABLE_VERIFIED_AT, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(PRICE_TABLE_STALE_AFTER_DAYS >= 30);
+  assert.ok(PRICE_TABLE_STALE_AFTER_DAYS <= 365);
 });

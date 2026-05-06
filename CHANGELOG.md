@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-06
+
+Adds **PDF source support** and **local file ingestion** — the two biggest content-coverage gaps left in deepdive. Real research questions hit PDFs constantly (academic papers, RFCs, standards bodies); the most useful sources are often already on the user's laptop (project notes, internal docs). Both now work.
+
+Also closes a small loop on the v0.6.0 cost-telemetry commitment: the price table is now timestamped and `deepdive doctor` warns if it's been more than 90 days since the maintainer audited it against vendor pricing.
+
+### Added — PDF extraction (`src/pdf.ts`, ~180 lines, no new runtime deps)
+
+PDFs are detected by URL extension or `Content-Type: application/pdf` and routed through a separate extractor path instead of the headless browser's DOM. The extractor uses [`pdfjs-dist`](https://github.com/mozilla/pdfjs-dist), Mozilla's reference PDF.js library — but it is **not** a runtime dependency. To preserve deepdive's "one runtime dependency" headline guarantee, `pdfjs-dist` is dynamically imported on first use; if it's missing, the source is skipped cleanly with a `fetch.skipped` event whose reason is `pdf-no-extractor` and a one-line install hint.
+
+Enable PDF support with:
+
+```bash
+npm install -g pdfjs-dist
+```
+
+- New module `src/pdf.ts` exporting `extractPdfText`, `isPdfExtractorAvailable`, `looksLikePdf`, `joinTextItems`, `dedupeRunningHeadersFooters`, and `PdfExtractorMissingError`. All testable in isolation.
+- New CLI flag `--pdf-max-pages=<n>` (default 50). Large papers are truncated rather than blowing the synth context.
+- New env var `DEEPDIVE_PDF_MAX_PAGES`.
+- New `fetch.skipped` reason `"pdf-no-extractor"`.
+- `BrowserSession.fetch` now short-circuits PDF URLs to a plain HTTP GET via Playwright's request context (Chromium's PDF viewer never exposes useful text via the DOM, and `page.goto()` on a PDF can hang on `networkidle` waits). `FetchedPage` gains optional `mimeType` and `bytes` fields.
+- A frequency-based deduper drops running headers / footers / page-number lines that appear on more than 60% of pages.
+
+### Added — local file source ingestion (`src/local.ts`, ~140 lines, no new runtime deps)
+
+The `--include=<path>[,<path>]` flag pre-loads files or directories as sources before any web search runs. Local sources sit at the head of the kept-sources list, so they receive the lowest `[N]` citation IDs and stay most prominent to the synthesizer. Files are exposed as `file:///abs/path` URLs in the citation footer — clickable from the user's terminal/editor.
+
+Supported extensions:
+
+| Extension | How |
+|---|---|
+| `.pdf` | via `extractPdfText` (requires `pdfjs-dist`) |
+| `.md`, `.markdown`, `.txt`, `.text` | read as plain text |
+| `.html`, `.htm` | tags stripped + a small entity decoder |
+
+- New module `src/local.ts` exporting `ingestLocalPaths`, `expandPaths`, `stripTags`. Pure decision functions, no I/O outside `expandPaths` / `ingestLocalPaths` themselves.
+- Directory expansion is one level deep — recursing into arbitrary trees is not the default to avoid surprising users who point at their home directory.
+- New CLI flag `--include=<path>[,<path>]` and env var `DEEPDIVE_INCLUDE`. Files that fail to extract (e.g. PDF without `pdfjs-dist`, unsupported extension) are recorded in `LocalIngestResult.skipped[]` and surfaced as the `include.done` agent event.
+- `AgentConfig.include?: string[]` for library consumers.
+
+### Added — `deepdive doctor`: pdf + pricing checks
+
+- New check `pdf.extractor`: `ok` when `pdfjs-dist` resolves, `info` (with install hint) otherwise.
+- New check `pricing.table`: prints the model count and the verification age. Warns if the table is more than `PRICE_TABLE_STALE_AFTER_DAYS` (90) days old. Closes the loop on v0.6.0's "drift is intentional, audit happens at PR time" commitment — undeclared drift now produces a visible warning. New `PRICE_TABLE_VERIFIED_AT` constant in `src/pricing.ts` and `daysAgo(isoDate, now?)` helper, both exported.
+
+### Tests
+
+35 new across `test/pdf.test.mjs` (11 — pure helpers + an in-memory minimal-PDF round-trip), `test/local.test.mjs` (9 — `stripTags` / `expandPaths` / `ingestLocalPaths`), `test/agent-loop.test.mjs` (2 — `--include` and PDF-byte routing end-to-end), `test/pricing.test.mjs` (5 — `daysAgo` and drift-constant coherence), `test/doctor.test.mjs` (3 — fresh / stale / pdf checks), plus 4 CLI/config flag-plumbing tests. Total test footprint now 310 across 7 suites.
+
 ## [0.6.0] - 2026-05-05
 
 Adds **per-run cost telemetry**: every run now prints a one-line summary of the LLM tokens it consumed and what the same workload would have cost at API list prices, reinforcing the README cost-arbitrage table with real numbers from real runs.

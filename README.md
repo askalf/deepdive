@@ -132,6 +132,33 @@ What this is not: a semantic judge. Lexical recall flags hallucinated names, num
 
 ---
 
+## PDFs and local files
+
+Two long-standing gaps closed in v0.7: real research questions hit PDFs constantly (academic papers, RFCs, standards docs), and the most useful sources are often already on your laptop (project notes, internal docs, exported chats). deepdive now reads both.
+
+**PDFs** are detected by URL extension or `Content-Type` and routed through a separate extractor instead of the headless browser's DOM (Chromium's PDF viewer doesn't expose useful text). Page cap defaults to 50 (`--pdf-max-pages=<n>`); large papers are truncated rather than blowing the synth context.
+
+PDF extraction uses [`pdfjs-dist`](https://github.com/mozilla/pdfjs-dist) — Mozilla's reference PDF.js library. To preserve deepdive's "one runtime dependency" guarantee on default installs, `pdfjs-dist` is **not** a runtime dep. The extractor is dynamically imported the first time a PDF is seen; if the library isn't installed, the source is skipped with a clear `pdf-no-extractor` event. Enable with one command:
+
+```bash
+npm install -g pdfjs-dist
+```
+
+`deepdive doctor` reports the install state under the `pdf` category.
+
+**Local files** are ingested via `--include=<path>[,<path>]`. Each path may be a file or a directory (one level deep, supported extensions only). Files become pre-fetched sources at the head of the kept-sources list — they get the lowest `[N]` citation IDs, so they're most prominent to the synthesizer. Supported types: `.pdf` (needs `pdfjs-dist`), `.md`, `.txt`, `.html`.
+
+```bash
+# Mix your project notes with web research:
+deepdive "what's our policy on retroactive billing?" \
+  --include=~/notes/billing,./CONTRIBUTING.md \
+  --search=brave --deep
+```
+
+This is the kind of thing hosted research tools cannot do — your notes don't leave your machine, and the resulting answer cites them as `file:///abs/path` URLs the user can click open.
+
+---
+
 ## Cost telemetry
 
 Every run prints a one-line summary on stderr at the end:
@@ -162,6 +189,8 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | `--cite-min-recall=<0..1>` | `0.4` | Citation-support threshold. Lower = more permissive. |
 | `--no-verify-cites` | off | Skip the citation-verification pass entirely. |
 | `--no-cost` | off | Suppress the end-of-run cost summary on stderr. |
+| `--include=<paths>` | — | Comma-separated local files / dirs to ingest as sources (`.pdf`, `.md`, `.txt`, `.html`). |
+| `--pdf-max-pages=<n>` | `50` | Per-PDF page cap. Larger PDFs are truncated. |
 | `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, cost, usage}` for piping. |
 | `--out=<path>` | — | Save to file. |
 | `--verbose`, `-v` | — | Stream plan / search / fetch / critique / verify events to stderr. |
