@@ -186,6 +186,27 @@ test("resolveConfig: citation verification on by default, env/flag toggle", () =
   );
 });
 
+test("resolveConfig: pdfMaxPages defaults to 50; env/flag override", () => {
+  assert.equal(resolveConfig({}, {}).pdfMaxPages, 50);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_PDF_MAX_PAGES: "20" }).pdfMaxPages,
+    20,
+  );
+  assert.equal(resolveConfig({ pdfMaxPages: 5 }, {}).pdfMaxPages, 5);
+});
+
+test("resolveConfig: include from flag wins; env-only otherwise", () => {
+  assert.deepEqual(resolveConfig({}, {}).include, []);
+  assert.deepEqual(
+    resolveConfig({}, { DEEPDIVE_INCLUDE: "/a,/b" }).include,
+    ["/a", "/b"],
+  );
+  assert.deepEqual(
+    resolveConfig({ include: ["/x"] }, { DEEPDIVE_INCLUDE: "/a,/b" }).include,
+    ["/x"],
+  );
+});
+
 test("resolveConfig: cost summary on by default; flag/env disable", () => {
   assert.equal(resolveConfig({}, {}).costEnabled, true);
   assert.equal(resolveConfig({ noCost: true }, {}).costEnabled, false);

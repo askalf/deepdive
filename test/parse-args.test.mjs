@@ -150,3 +150,18 @@ test("parseArgs: --no-cost flag", () => {
   const p = parseArgs(["q", "--no-cost"]);
   assert.equal(p.flags.noCost, true);
 });
+
+test("parseArgs: --pdf-max-pages=N parses positive int", () => {
+  const p = parseArgs(["q", "--pdf-max-pages=20"]);
+  assert.equal(p.flags.pdfMaxPages, 20);
+});
+
+test("parseArgs: --include splits on comma and trims", () => {
+  const p = parseArgs(["q", "--include=/a/b.md, /c/d.txt , /e"]);
+  assert.deepEqual(p.flags.include, ["/a/b.md", "/c/d.txt", "/e"]);
+});
+
+test("parseArgs: --include= with empty parts drops them", () => {
+  const p = parseArgs(["q", "--include=/a,,/b,"]);
+  assert.deepEqual(p.flags.include, ["/a", "/b"]);
+});

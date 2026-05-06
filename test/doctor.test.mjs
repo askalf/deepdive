@@ -344,3 +344,58 @@ test("runDoctor: exit code 1 when any fail, 0 otherwise", async () => {
   assert.equal(report.summary.fail, 0);
   assert.equal(exitCodeFor(report), 0);
 });
+
+test("runDoctor: includes a 'pdf' category check", async () => {
+  const config = baseConfig({
+    cache: { enabled: false, dir: "/tmp/never", ttlMs: 60_000 },
+  });
+  const report = await runDoctor({
+    config,
+    env: {},
+    skipLLM: true,
+    skipSearch: true,
+    skipBrowser: true,
+  });
+  const pdf = report.checks.find((c) => c.id === "pdf.extractor");
+  assert.ok(pdf, "pdf.extractor check should be present");
+  // pdfjs-dist is a devDependency of this repo; in CI/local it should resolve.
+  assert.equal(pdf.status, "ok");
+  assert.match(pdf.detail, /pdfjs-dist available/);
+});
+
+test("runDoctor: pricing.table check warns when PRICE_TABLE is stale", async () => {
+  const config = baseConfig({
+    cache: { enabled: false, dir: "/tmp/never", ttlMs: 60_000 },
+  });
+  // Force "now" to be 100 years after the verification date — guaranteed stale.
+  const report = await runDoctor({
+    config,
+    env: {},
+    skipLLM: true,
+    skipSearch: true,
+    skipBrowser: true,
+    now: () => Date.UTC(2126, 0, 1),
+  });
+  const pricing = report.checks.find((c) => c.id === "pricing.table");
+  assert.ok(pricing);
+  assert.equal(pricing.status, "warn");
+  assert.match(pricing.detail, /stale/);
+});
+
+test("runDoctor: pricing.table check is ok when fresh", async () => {
+  const config = baseConfig({
+    cache: { enabled: false, dir: "/tmp/never", ttlMs: 60_000 },
+  });
+  // Force "now" to be the same day as the verification date — fresh.
+  const report = await runDoctor({
+    config,
+    env: {},
+    skipLLM: true,
+    skipSearch: true,
+    skipBrowser: true,
+    now: () => Date.UTC(2026, 4, 5),
+  });
+  const pricing = report.checks.find((c) => c.id === "pricing.table");
+  assert.ok(pricing);
+  assert.equal(pricing.status, "ok");
+});

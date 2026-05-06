@@ -63,6 +63,10 @@ Flags:
   --strict-cites                Exit non-zero if any citation is unsupported
   --cite-min-recall=<0..1>      Threshold for citation support. Default: 0.4
   --no-cost                     Suppress the end-of-run cost summary on stderr
+  --include=<paths>             Comma-separated list of local files / dirs to
+                                ingest as sources (.pdf, .md, .txt, .html).
+                                PDFs require pdfjs-dist installed.
+  --pdf-max-pages=<n>           Cap pages parsed per PDF. Default: 50
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
   --verbose, -v                 Stream progress events to stderr
@@ -79,7 +83,8 @@ Environment:
   DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE,
   DEEPDIVE_LLM_TIMEOUT_MS, DEEPDIVE_LLM_ATTEMPTS,
   DEEPDIVE_NO_VERIFY_CITES, DEEPDIVE_STRICT_CITES, DEEPDIVE_CITE_MIN_RECALL,
-  DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK
+  DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK,
+  DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES
 `;
 
 interface ParsedArgs {
@@ -187,6 +192,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "cite-min-recall":
           flags.citeMinRecall = parseUnitFloat(value);
           break;
+        case "pdf-max-pages":
+          flags.pdfMaxPages = parsePositiveInt(value);
+          break;
+        case "include":
+          flags.include = value
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          break;
         case "out":
           outPath = value;
           break;
@@ -248,6 +262,8 @@ function renderEvent(e: AgentEvent): string {
       return `          ${e.ok ? "OK " : "!! "}${e.status} · ${e.words} words${e.cached ? " · cache" : ""}`;
     case "fetch.skipped":
       return `  fetch   skipped (${e.reason}) ${e.url}`;
+    case "include.done":
+      return `  include ${e.ingested} ingested${e.skipped ? ` · ${e.skipped} skipped` : ""}`;
     case "synthesize.start":
       return `  synth   round ${e.round} · ${e.sourceCount} source${e.sourceCount === 1 ? "" : "s"}`;
     case "synthesize.done":
@@ -393,6 +409,8 @@ async function main(argv: string[]): Promise<number> {
         respectRobots: config.respectRobots,
         verifyCitations: config.verifyCitations,
         citeMinRecall: config.citeMinRecall,
+        pdfMaxPages: config.pdfMaxPages,
+        include: config.include,
         env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
