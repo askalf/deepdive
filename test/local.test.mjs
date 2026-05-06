@@ -48,6 +48,26 @@ test("stripTags: matches </script > with whitespace before the close bracket", (
   assert.doesNotMatch(out, /alert/);
 });
 
+test("stripTags: matches </script\\t\\n bar> with junk between tag name and >", () => {
+  // Browsers tolerate attribute-like content in closing tags; the
+  // sanitizer must too. CodeQL flagged the </script\s*> form as
+  // insufficient because </script\t\n bar> has non-whitespace bytes.
+  const html =
+    "<p>before</p><script>alert(1)</script\t\n bar><p>after</p>";
+  const out = stripTags(html);
+  assert.match(out, /before/);
+  assert.match(out, /after/);
+  assert.doesNotMatch(out, /alert/);
+});
+
+test("stripTags: matches </style attr=junk> with attributes in close tag", () => {
+  const html =
+    "<style>body{}</style attr=x><p>visible</p>";
+  const out = stripTags(html);
+  assert.doesNotMatch(out, /body\{/);
+  assert.match(out, /visible/);
+});
+
 test("stripTags: does NOT double-unescape &amp;lt;", () => {
   // Sequential .replace() would turn "&amp;lt;" → "&lt;" → "<".
   // The single-pass decode preserves the literal the author wrote.

@@ -150,13 +150,14 @@ export async function expandPaths(inputs: string[]): Promise<string[]> {
 // sanitizing untrusted input).
 export function stripTags(html: string): string {
   return html
-    // Lazy match with optional whitespace before the closing > so we
-    // catch </script > and </script\n> variants. CodeQL flagged the
-    // previous greedy-with-lookahead pattern as a bad-HTML-filtering
-    // regexp; we accept the offline-trusted-input scope and use a
-    // simpler bounded form.
-    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, " ")
-    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, " ")
+    // Lazy match with `\b[^>]*>` to tolerate whitespace, attributes, or
+    // other junk between the tag name and the closing `>` — browsers
+    // accept </script foo>, </script\t\n bar>, </style xx>, etc., so a
+    // strict </script\s*> check would let those slip through. Bounded
+    // ([^>]* with no nested quantifier) so no polynomial-backtracking
+    // risk. Scope is offline-trusted input — not a security sanitizer.
+    .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style\b[^>]*>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<[^>]+>/g, " ")
     // Single-pass entity decode. Sequential .replace() calls would
