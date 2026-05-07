@@ -137,13 +137,14 @@ test("resolveConfig: llm.timeoutMs defaults to 120000, env + flag override", () 
   );
 });
 
-test("resolveConfig: streamEnabled — on by default, off for --json, --no-stream, or deep mode", () => {
+test("resolveConfig: streamEnabled — on by default, off for --json or --no-stream", () => {
   // Default: on
   assert.equal(resolveConfig({}, {}).streamEnabled, true);
   // JSON off
   assert.equal(resolveConfig({ json: true }, {}).streamEnabled, false);
-  // Deep off (any deepRounds > 0)
-  assert.equal(resolveConfig({ deepRounds: 2 }, {}).streamEnabled, false);
+  // Deep mode no longer disables streaming (v0.9 — round-header
+  // separators between intermediate drafts make this safe).
+  assert.equal(resolveConfig({ deepRounds: 2 }, {}).streamEnabled, true);
   // --no-stream explicit off
   assert.equal(resolveConfig({ noStream: true }, {}).streamEnabled, false);
   // DEEPDIVE_NO_STREAM=1 off
@@ -193,6 +194,20 @@ test("resolveConfig: pdfMaxPages defaults to 50; env/flag override", () => {
     20,
   );
   assert.equal(resolveConfig({ pdfMaxPages: 5 }, {}).pdfMaxPages, 5);
+});
+
+test("resolveConfig: sessions enabled by default; --no-sessions disables", () => {
+  assert.equal(resolveConfig({}, {}).sessions.enabled, true);
+  assert.equal(resolveConfig({ noSessions: true }, {}).sessions.enabled, false);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_NO_SESSIONS: "1" }).sessions.enabled,
+    false,
+  );
+});
+
+test("resolveConfig: DEEPDIVE_SESSIONS_DIR overrides the default", () => {
+  const c = resolveConfig({}, { DEEPDIVE_SESSIONS_DIR: "/tmp/custom-sessions" });
+  assert.equal(c.sessions.dir, "/tmp/custom-sessions");
 });
 
 test("resolveConfig: domainFilter from flag and env", () => {

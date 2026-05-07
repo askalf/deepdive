@@ -135,7 +135,11 @@ export interface RoundTrace {
 export interface AgentResult {
   question: string;
   plan: Plan;
-  sources: Source[];
+  // Includes the full extracted content per source — needed by the
+  // session-persistence path (so `deepdive resume <id>` can re-synthesize
+  // without re-fetching). SourceWithContent extends Source, so existing
+  // consumers reading `id` / `url` / `title` / `fetchedAt` are unaffected.
+  sources: SourceWithContent[];
   answer: string;
   markdown: string;
   rounds: RoundTrace[];

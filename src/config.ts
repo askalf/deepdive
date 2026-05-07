@@ -7,6 +7,7 @@ import type { LLMConfig } from "./llm.js";
 import type { BrowserOptions } from "./browser.js";
 import { parseDomainList, type DomainFilter } from "./domain-filter.js";
 import { detectApiFormat, type ApiFormat } from "./llm-format.js";
+import { defaultSessionsDir } from "./sessions.js";
 
 export interface RuntimeConfig {
   llm: LLMConfig;
@@ -26,6 +27,7 @@ export interface RuntimeConfig {
   pdfMaxPages: number;
   include: string[];
   domainFilter: DomainFilter;
+  sessions: { enabled: boolean; dir: string };
   jsonOutput: boolean;
   streamEnabled: boolean;
   verbose: boolean;
@@ -57,6 +59,7 @@ export interface CLIFlags {
   allowDomain?: string[];
   denyDomain?: string[];
   apiFormat?: ApiFormat;
+  noSessions?: boolean;
   json?: boolean;
   noStream?: boolean;
   verbose?: boolean;
@@ -180,6 +183,14 @@ export function resolveConfig(
     deny: flags.denyDomain ?? parseDomainList(env.DEEPDIVE_DENY_DOMAIN),
   };
 
+  const sessionsEnabled =
+    flags.noSessions === true
+      ? false
+      : env.DEEPDIVE_NO_SESSIONS === "1"
+      ? false
+      : true;
+  const sessionsDir = defaultSessionsDir(env);
+
   // API format: explicit flag/env wins; otherwise auto-detect from baseUrl.
   const apiFormatEnv =
     env.DEEPDIVE_API_FORMAT === "openai" || env.DEEPDIVE_API_FORMAT === "anthropic"
@@ -189,12 +200,13 @@ export function resolveConfig(
     flags.apiFormat ?? apiFormatEnv ?? detectApiFormat(baseUrl);
   const jsonOutput = flags.json ?? env.DEEPDIVE_JSON === "1";
   const streamOptOut = flags.noStream ?? env.DEEPDIVE_NO_STREAM === "1";
-  // Streaming is on by default but gets auto-disabled for:
+  // Streaming is on by default. Auto-disabled for:
   //  - JSON output (we buffer into the JSON envelope)
-  //  - Deep mode (intermediate rounds would print multiple full drafts back-to-back)
   //  - Explicit --no-stream
+  // Deep mode used to disable streaming; v0.9 enables it again with
+  // round-header separators between intermediate drafts.
   // CLI can further require stdout.isTTY before enabling.
-  const streamEnabled = !streamOptOut && !jsonOutput && deepRounds === 0;
+  const streamEnabled = !streamOptOut && !jsonOutput;
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
 
   return {
@@ -227,6 +239,7 @@ export function resolveConfig(
     pdfMaxPages,
     include,
     domainFilter,
+    sessions: { enabled: sessionsEnabled, dir: sessionsDir },
     jsonOutput,
     streamEnabled,
     verbose,
