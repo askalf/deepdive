@@ -28,6 +28,7 @@ import {
   looksLikePdf,
 } from "./pdf.js";
 import { ingestLocalPaths } from "./local.js";
+import { classifyUrl, type DomainFilter } from "./domain-filter.js";
 import type { PageCache } from "./cache.js";
 import { runConcurrent } from "./concurrency.js";
 import {
@@ -71,6 +72,11 @@ export interface AgentConfig {
   // Local files / dirs to ingest as pre-fetched sources. PDFs in this
   // list need pdfjs-dist installed; missing module → file is skipped.
   include?: string[];
+  // Hostname-suffix filters applied between search and fetch.
+  // - allow non-empty → URL must match at least one
+  // - deny non-empty → URL must not match any
+  // - both non-empty → allow takes precedence then deny is checked
+  domainFilter?: DomainFilter;
   // Environment passed through to pricing.ts for the unknown-model
   // override case (DEEPDIVE_PRICE_INPUT_PER_MTOK / _OUTPUT_PER_MTOK).
   // Defaults to undefined — the price table covers known models.
@@ -98,7 +104,11 @@ export type AgentEvent =
       words: number;
       cached: boolean;
     }
-  | { type: "fetch.skipped"; url: string; reason: "robots" | "pdf-no-extractor" }
+  | {
+      type: "fetch.skipped";
+      url: string;
+      reason: "robots" | "pdf-no-extractor" | "domain-deny" | "domain-not-allowed";
+    }
   | { type: "include.done"; ingested: number; skipped: number }
   | { type: "synthesize.start"; sourceCount: number; round: number }
   | { type: "synthesize.done"; round: number }
@@ -234,16 +244,30 @@ export async function runAgent(
           signal,
         );
         const fresh = dedupeByUrl(results).filter((r) => !seenUrls.has(r.url));
+        let kept = 0;
         for (const r of fresh) {
           seenUrls.add(r.url);
+          if (config.domainFilter) {
+            const verdict = classifyUrl(r.url, config.domainFilter);
+            if (verdict !== "allow") {
+              emit(config, {
+                type: "fetch.skipped",
+                url: r.url,
+                reason:
+                  verdict === "deny-listed" ? "domain-deny" : "domain-not-allowed",
+              });
+              continue;
+            }
+          }
           allCandidates.push({
             url: r.url,
             title: r.title,
             snippet: r.snippet,
             query,
           });
+          kept++;
         }
-        emit(config, { type: "search.done", query, count: fresh.length });
+        emit(config, { type: "search.done", query, count: kept });
       }
       const candidatesFoundThisRound = allCandidates.length - candidatesBefore;
 
@@ -339,6 +363,22 @@ export async function runAgent(
 
       const isLastPossibleRound = round === maxRoundsTotal - 1;
       if (!isLastPossibleRound && keptSources.length < config.maxSources) {
+        // Mid-loop citation verification — when enabled, surface weak
+        // cites to the critic so the next round's queries can target the
+        // exact sentences that lack authoritative support. The final
+        // verifier pass still runs after the loop exits and produces the
+        // user-facing report; this in-loop pass is purely advisory.
+        let weakCites: { sentence: string; citedIds: number[] }[] = [];
+        if (config.verifyCitations !== false && answer) {
+          const inLoop = runVerify(answer, keptSources, {
+            threshold: config.citeMinRecall ?? DEFAULT_CITE_MIN_RECALL,
+          });
+          weakCites = inLoop.unsupported.map((c) => ({
+            sentence: c.sentence,
+            citedIds: c.citedIds,
+          }));
+        }
+
         emit(config, { type: "critique.start", round });
         const crit = await critique(
           question,
@@ -347,6 +387,7 @@ export async function runAgent(
           config.llm,
           signal,
           usageSinkFor("critique", round),
+          weakCites,
         );
         emit(config, { type: "critique.done", round, critique: crit });
         roundTrace.critique = crit;

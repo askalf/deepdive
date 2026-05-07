@@ -165,3 +165,25 @@ test("parseArgs: --include= with empty parts drops them", () => {
   const p = parseArgs(["q", "--include=/a,,/b,"]);
   assert.deepEqual(p.flags.include, ["/a", "/b"]);
 });
+
+test("parseArgs: --allow-domain splits on comma", () => {
+  const p = parseArgs(["q", "--allow-domain=github.com, docs.anthropic.com"]);
+  assert.deepEqual(p.flags.allowDomain, ["github.com", "docs.anthropic.com"]);
+});
+
+test("parseArgs: --deny-domain splits on comma", () => {
+  const p = parseArgs(["q", "--deny-domain=pinterest.com,quora.com"]);
+  assert.deepEqual(p.flags.denyDomain, ["pinterest.com", "quora.com"]);
+});
+
+test("parseArgs: --api-format accepts anthropic and openai", () => {
+  assert.equal(parseArgs(["q", "--api-format=openai"]).flags.apiFormat, "openai");
+  assert.equal(
+    parseArgs(["q", "--api-format=anthropic"]).flags.apiFormat,
+    "anthropic",
+  );
+});
+
+test("parseArgs: --api-format=other throws", () => {
+  assert.throws(() => parseArgs(["q", "--api-format=mistral"]), /must be 'anthropic' or 'openai'/);
+});

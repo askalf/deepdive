@@ -128,6 +128,8 @@ For each sentence with a citation, the verifier tokenizes the claim into content
 
 When something fails, deepdive prints a small `## Citation health` footer at the end of the answer and surfaces the offending sentences in `--verbose`. Clean runs stay clean: no footer, no noise. Use `--strict-cites` in scripts to fail the run with a non-zero exit code.
 
+In `--deep` mode the verifier runs once per round, not just at the end: when intermediate rounds produce sentences with weak citations, those sentences are forwarded to the critic as top-priority gaps to fill in the next round of search. The critic and verifier close the loop — instead of "find more sources, hope they help," the next round explicitly hunts for authoritative support for the exact sentences that lack it.
+
 What this is not: a semantic judge. Lexical recall flags hallucinated names, numbers, and dates with high precision, but a paraphrased-but-truthful sentence can score below threshold and a topic-aligned-but-incorrect sentence can score above. Treat the report as a sanity check and a reading guide, not a proof of correctness. To dial the strictness, raise `--cite-min-recall` above the default `0.4`; to disable entirely, pass `--no-verify-cites`.
 
 ---
@@ -174,6 +176,50 @@ The "$0 on Claude Max via dario" hint only appears when `--base-url` matches dar
 
 ---
 
+## OpenAI-compatible endpoints
+
+deepdive's wire format is Anthropic Messages by default — that's what dario speaks natively, and it's the format every Claude provider exposes. But the same pipeline works against any OpenAI Chat Completions endpoint via a built-in request/response adapter. Auto-detected from `--base-url`:
+
+| URL pattern | Detected as |
+|---|---|
+| `api.openai.com/...` | `openai` |
+| `localhost:11434` (Ollama default) | `openai` |
+| `localhost:8000` (vLLM convention) | `openai` |
+| anything else | `anthropic` |
+
+Override with `--api-format=anthropic|openai` or `DEEPDIVE_API_FORMAT`. The adapter translates request shape, headers (Bearer for OpenAI, `x-api-key` + `anthropic-version` for Anthropic), the streaming SSE event format (`choices[].delta.content` ↔ `content_block_delta`), and the `usage` field (`prompt_tokens` / `completion_tokens` ↔ `input_tokens` / `output_tokens`).
+
+```bash
+# Run against an Ollama-served local model:
+deepdive "explain how X works" --base-url=http://localhost:11434 --model=llama3.1
+
+# Run against OpenAI directly (auto-detected):
+OPENAI_API_KEY=sk-... deepdive "..." \
+  --base-url=https://api.openai.com --api-key=$OPENAI_API_KEY --model=gpt-4o
+```
+
+Cost telemetry still works for OpenAI-shape endpoints — you'll need to plug in the pricing yourself via `DEEPDIVE_PRICE_INPUT_PER_MTOK` / `DEEPDIVE_PRICE_OUTPUT_PER_MTOK` since the built-in price table only covers the Claude models.
+
+---
+
+## Domain allow / deny lists
+
+When the planner picks URLs, you sometimes want to force-pin to authoritative sources or drop noisy ones. Two flags, hostname-suffix matching:
+
+```bash
+# Drop low-signal sources:
+deepdive "what's the difference between X and Y" \
+  --deny-domain=pinterest.com,quora.com,reddit.com
+
+# Pin to authoritative sources for a sensitive question:
+deepdive "what does Anthropic's TOS say about Y" \
+  --allow-domain=anthropic.com,docs.anthropic.com
+```
+
+Patterns match exactly OR as a strict subdomain (`github.com` matches `github.com` and `api.github.com`, but not `githubcompany.com`). Filtered URLs surface as `fetch.skipped` events with reason `domain-deny` or `domain-not-allowed` in `--verbose`. Both flags can be combined: a URL must pass the allow list AND not match the deny list. Env equivalents: `DEEPDIVE_ALLOW_DOMAIN`, `DEEPDIVE_DENY_DOMAIN`.
+
+---
+
 ## Common flags
 
 Run `deepdive --help` for the full list. The ones you'll reach for:
@@ -191,6 +237,9 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | `--no-cost` | off | Suppress the end-of-run cost summary on stderr. |
 | `--include=<paths>` | — | Comma-separated local files / dirs to ingest as sources (`.pdf`, `.md`, `.txt`, `.html`). |
 | `--pdf-max-pages=<n>` | `50` | Per-PDF page cap. Larger PDFs are truncated. |
+| `--allow-domain=<list>` | — | Comma-separated hostname suffixes — keep only matching URLs. |
+| `--deny-domain=<list>` | — | Comma-separated hostname suffixes — drop matching URLs. |
+| `--api-format=<anthropic\|openai>` | auto | Wire format for the LLM endpoint. Auto-detected from `--base-url`. |
 | `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, cost, usage}` for piping. |
 | `--out=<path>` | — | Save to file. |
 | `--verbose`, `-v` | — | Stream plan / search / fetch / critique / verify events to stderr. |

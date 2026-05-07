@@ -67,6 +67,15 @@ Flags:
                                 ingest as sources (.pdf, .md, .txt, .html).
                                 PDFs require pdfjs-dist installed.
   --pdf-max-pages=<n>           Cap pages parsed per PDF. Default: 50
+  --allow-domain=<list>         Comma-separated hostname suffixes to keep
+                                exclusively (e.g. github.com,docs.anthropic.com).
+  --deny-domain=<list>          Comma-separated hostname suffixes to drop
+                                (e.g. pinterest.com,quora.com).
+  --api-format=<anthropic|openai>
+                                Wire format for the LLM endpoint. Default:
+                                auto-detected from --base-url (api.openai.com,
+                                :11434 (Ollama), :8000 default to openai;
+                                everything else to anthropic).
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
   --verbose, -v                 Stream progress events to stderr
@@ -84,7 +93,8 @@ Environment:
   DEEPDIVE_LLM_TIMEOUT_MS, DEEPDIVE_LLM_ATTEMPTS,
   DEEPDIVE_NO_VERIFY_CITES, DEEPDIVE_STRICT_CITES, DEEPDIVE_CITE_MIN_RECALL,
   DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK,
-  DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES
+  DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES,
+  DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_API_FORMAT
 `;
 
 interface ParsedArgs {
@@ -200,6 +210,26 @@ export function parseArgs(argv: string[]): ParsedArgs {
             .split(",")
             .map((s) => s.trim())
             .filter((s) => s.length > 0);
+          break;
+        case "allow-domain":
+          flags.allowDomain = value
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          break;
+        case "deny-domain":
+          flags.denyDomain = value
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          break;
+        case "api-format":
+          if (value !== "anthropic" && value !== "openai") {
+            throw new Error(
+              `--api-format must be 'anthropic' or 'openai' (got: ${value})`,
+            );
+          }
+          flags.apiFormat = value;
           break;
         case "out":
           outPath = value;
@@ -411,6 +441,7 @@ async function main(argv: string[]): Promise<number> {
         citeMinRecall: config.citeMinRecall,
         pdfMaxPages: config.pdfMaxPages,
         include: config.include,
+        domainFilter: config.domainFilter,
         env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");

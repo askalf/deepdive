@@ -195,6 +195,45 @@ test("resolveConfig: pdfMaxPages defaults to 50; env/flag override", () => {
   assert.equal(resolveConfig({ pdfMaxPages: 5 }, {}).pdfMaxPages, 5);
 });
 
+test("resolveConfig: domainFilter from flag and env", () => {
+  assert.deepEqual(resolveConfig({}, {}).domainFilter, { allow: [], deny: [] });
+  assert.deepEqual(
+    resolveConfig({}, {
+      DEEPDIVE_ALLOW_DOMAIN: "github.com",
+      DEEPDIVE_DENY_DOMAIN: "pinterest.com,quora.com",
+    }).domainFilter,
+    { allow: ["github.com"], deny: ["pinterest.com", "quora.com"] },
+  );
+  assert.deepEqual(
+    resolveConfig(
+      { allowDomain: ["a.com"], denyDomain: ["b.com"] },
+      { DEEPDIVE_ALLOW_DOMAIN: "ignored.com" },
+    ).domainFilter,
+    { allow: ["a.com"], deny: ["b.com"] },
+  );
+});
+
+test("resolveConfig: apiFormat — flag > env > auto-detect", () => {
+  // Auto-detect: openai.com → openai
+  assert.equal(
+    resolveConfig({ baseUrl: "https://api.openai.com" }, {}).llm.apiFormat,
+    "openai",
+  );
+  // Auto-detect: dario default → anthropic
+  assert.equal(resolveConfig({}, {}).llm.apiFormat, "anthropic");
+  // Env override: anthropic baseUrl + DEEPDIVE_API_FORMAT=openai → openai
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_API_FORMAT: "openai" }).llm.apiFormat,
+    "openai",
+  );
+  // Flag wins over env
+  assert.equal(
+    resolveConfig({ apiFormat: "anthropic" }, { DEEPDIVE_API_FORMAT: "openai" }).llm
+      .apiFormat,
+    "anthropic",
+  );
+});
+
 test("resolveConfig: include from flag wins; env-only otherwise", () => {
   assert.deepEqual(resolveConfig({}, {}).include, []);
   assert.deepEqual(

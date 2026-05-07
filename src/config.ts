@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { LLMConfig } from "./llm.js";
 import type { BrowserOptions } from "./browser.js";
+import { parseDomainList, type DomainFilter } from "./domain-filter.js";
+import { detectApiFormat, type ApiFormat } from "./llm-format.js";
 
 export interface RuntimeConfig {
   llm: LLMConfig;
@@ -23,6 +25,7 @@ export interface RuntimeConfig {
   costEnabled: boolean;
   pdfMaxPages: number;
   include: string[];
+  domainFilter: DomainFilter;
   jsonOutput: boolean;
   streamEnabled: boolean;
   verbose: boolean;
@@ -51,6 +54,9 @@ export interface CLIFlags {
   noCost?: boolean;
   pdfMaxPages?: number;
   include?: string[];
+  allowDomain?: string[];
+  denyDomain?: string[];
+  apiFormat?: ApiFormat;
   json?: boolean;
   noStream?: boolean;
   verbose?: boolean;
@@ -168,6 +174,19 @@ export function resolveConfig(
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   const include = flags.include ?? includeFromEnv;
+
+  const domainFilter: DomainFilter = {
+    allow: flags.allowDomain ?? parseDomainList(env.DEEPDIVE_ALLOW_DOMAIN),
+    deny: flags.denyDomain ?? parseDomainList(env.DEEPDIVE_DENY_DOMAIN),
+  };
+
+  // API format: explicit flag/env wins; otherwise auto-detect from baseUrl.
+  const apiFormatEnv =
+    env.DEEPDIVE_API_FORMAT === "openai" || env.DEEPDIVE_API_FORMAT === "anthropic"
+      ? (env.DEEPDIVE_API_FORMAT as ApiFormat)
+      : undefined;
+  const apiFormat: ApiFormat =
+    flags.apiFormat ?? apiFormatEnv ?? detectApiFormat(baseUrl);
   const jsonOutput = flags.json ?? env.DEEPDIVE_JSON === "1";
   const streamOptOut = flags.noStream ?? env.DEEPDIVE_NO_STREAM === "1";
   // Streaming is on by default but gets auto-disabled for:
@@ -186,6 +205,7 @@ export function resolveConfig(
       maxTokens,
       timeoutMs: llmTimeoutMs,
       maxAttempts: llmAttempts,
+      apiFormat,
     },
     browser: {
       headless: env.DEEPDIVE_HEADED === "1" ? false : true,
@@ -206,6 +226,7 @@ export function resolveConfig(
     costEnabled,
     pdfMaxPages,
     include,
+    domainFilter,
     jsonOutput,
     streamEnabled,
     verbose,

@@ -11,6 +11,15 @@
 
 import { trimTrailingSlashes } from "./url-util.js";
 import { retry } from "./retry.js";
+import {
+  authHeadersFor,
+  detectApiFormat,
+  fromOpenAIResponse,
+  pathFor,
+  toOpenAIRequest,
+  type ApiFormat,
+  type OpenAIResponseShape,
+} from "./llm-format.js";
 
 export interface LLMConfig {
   baseUrl: string;
@@ -19,6 +28,10 @@ export interface LLMConfig {
   maxTokens: number;
   timeoutMs?: number;
   maxAttempts?: number;
+  // Wire format. Defaults to detection from baseUrl: api.openai.com /
+  // :11434 / :8000 → "openai"; everything else → "anthropic" (dario's
+  // native shape). Override with --api-format=anthropic|openai.
+  apiFormat?: ApiFormat;
 }
 
 export interface LLMMessage {
@@ -54,13 +67,17 @@ export async function callLLM(
   config: LLMConfig,
   signal?: AbortSignal,
 ): Promise<LLMResult> {
-  const url = `${trimTrailingSlashes(config.baseUrl)}/v1/messages`;
-  const body = {
+  const format = config.apiFormat ?? detectApiFormat(config.baseUrl);
+  const url = `${trimTrailingSlashes(config.baseUrl)}${pathFor(format)}`;
+  const anthropicBody = {
     model: config.model,
     max_tokens: config.maxTokens,
     system,
     messages,
   };
+  const body =
+    format === "openai" ? toOpenAIRequest(anthropicBody) : anthropicBody;
+  const headers = authHeadersFor(format, config.apiKey);
   const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
   const attempts = Math.max(1, config.maxAttempts ?? DEFAULT_LLM_ATTEMPTS);
 
@@ -71,11 +88,7 @@ export async function callLLM(
       try {
         res = await fetch(url, {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "anthropic-version": "2023-06-01",
-            "x-api-key": config.apiKey,
-          },
+          headers,
           body: JSON.stringify(body),
           signal: combined,
         });
@@ -93,10 +106,14 @@ export async function callLLM(
         );
       }
 
-      const json = (await res.json()) as {
-        content: { type: string; text?: string }[];
-        usage?: { input_tokens: number; output_tokens: number };
-      };
+      const raw = await res.json();
+      const json =
+        format === "openai"
+          ? fromOpenAIResponse(raw as OpenAIResponseShape)
+          : (raw as {
+              content: { type: string; text?: string }[];
+              usage?: { input_tokens: number; output_tokens: number };
+            });
 
       const text = json.content
         .filter((b) => b.type === "text" && typeof b.text === "string")
