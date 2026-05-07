@@ -73,6 +73,7 @@ You will receive:
 1. The original question.
 2. The current draft answer with inline [N] citations.
 3. The list of search queries already run.
+4. (Optional) A list of sentences whose [N] citations are weakly supported by their cited source — these are top-priority gaps to fill in the next round.
 
 Your job: identify the most important gaps in the draft answer — aspects of the question not answered, answered weakly, or answered with insufficient sourcing — and propose 0 to 3 additional search queries that would fill those gaps in the next round.
 
@@ -81,10 +82,16 @@ Rules:
 - Do not repeat queries similar to ones already searched. The list of prior queries is provided.
 - Queries must be concrete, search-engine-shaped phrases a user would type.
 - Prefer queries targeting specific unanswered facts over generic re-searches.
+- When weakly-supported sentences are flagged, prioritize queries that would find authoritative sources for those exact claims.
 - Keep the number of new queries minimal — fewer, sharper queries beat more, vaguer ones.
 
 Output FORMAT (strict): one JSON object, no prose before or after, matching:
 {"done": bool, "reasoning": "<1-2 sentences>", "queries": ["q1", "q2", ...]}`;
+
+export interface WeakCite {
+  sentence: string;
+  citedIds: number[];
+}
 
 export async function critique(
   question: string,
@@ -93,12 +100,24 @@ export async function critique(
   config: LLMConfig,
   signal?: AbortSignal,
   onUsage?: UsageSink,
+  weakCites: WeakCite[] = [],
 ): Promise<Critique> {
+  const weakSection =
+    weakCites.length > 0
+      ? `\n\nSentences with weak citations (top-priority gaps):\n` +
+        weakCites
+          .map(
+            (w) =>
+              `- "${truncateForPrompt(w.sentence)}" — cited [${w.citedIds.join(", ")}]`,
+          )
+          .join("\n")
+      : "";
   const userMessage =
     `Question: ${question}\n\n` +
     `Draft answer:\n${draftAnswer}\n\n` +
     `Queries already run (${priorQueries.length}):\n` +
     priorQueries.map((q) => `- ${q}`).join("\n") +
+    weakSection +
     `\n\nReview the draft and propose follow-up queries if needed.`;
   const { text, usage } = await callLLM(
     [{ role: "user", content: userMessage }],
@@ -108,6 +127,11 @@ export async function critique(
   );
   if (usage && onUsage) onUsage(usage);
   return parseCritique(text);
+}
+
+function truncateForPrompt(s: string): string {
+  const trimmed = s.trim().replace(/\s+/g, " ");
+  return trimmed.length <= 200 ? trimmed : trimmed.slice(0, 197) + "…";
 }
 
 // Exported for unit tests.

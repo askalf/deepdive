@@ -40,6 +40,65 @@ test("LLMError: retriable for 429 + 5xx, not for 4xx", () => {
   assert.equal(new LLMError(404, "x").retriable, false);
 });
 
+test("callLLM: openai apiFormat — translates request and response", async () => {
+  let receivedBody;
+  let receivedHeaders;
+  let receivedPath;
+  const server = makeServer((req, res) => {
+    receivedPath = req.url;
+    receivedHeaders = req.headers;
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      receivedBody = JSON.parse(body);
+      res.writeHead(200, { "content-type": "application/json" });
+      // OpenAI Chat Completions response shape
+      res.end(
+        JSON.stringify({
+          id: "chatcmpl-x",
+          object: "chat.completion",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "answer-from-openai" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 11, completion_tokens: 22 },
+        }),
+      );
+    });
+  });
+  const baseUrl = await start(server);
+  try {
+    const out = await callLLM(
+      [{ role: "user", content: "hi" }],
+      "sys-prompt",
+      {
+        baseUrl,
+        apiKey: "sk-abc",
+        model: "gpt-4",
+        maxTokens: 100,
+        apiFormat: "openai",
+      },
+    );
+    assert.equal(out.text, "answer-from-openai");
+    assert.deepEqual(out.usage, { input_tokens: 11, output_tokens: 22 });
+    // Path translated
+    assert.equal(receivedPath, "/v1/chat/completions");
+    // Headers — Bearer auth, no Anthropic version pin
+    assert.equal(receivedHeaders.authorization, "Bearer sk-abc");
+    assert.equal(receivedHeaders["x-api-key"], undefined);
+    // Request body — system prompt prepended as a system message
+    assert.equal(receivedBody.messages[0].role, "system");
+    assert.equal(receivedBody.messages[0].content, "sys-prompt");
+    assert.equal(receivedBody.messages[1].role, "user");
+    assert.equal(receivedBody.messages[1].content, "hi");
+  } finally {
+    await stop(server);
+  }
+});
+
 test("callLLM: succeeds on first try", async () => {
   let calls = 0;
   const server = makeServer((_req, res) => {

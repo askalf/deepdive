@@ -547,6 +547,144 @@ test("agent: unknown model yields knownModel=false and amountUsd=0", async () =>
   }
 });
 
+test("agent: --deep + verifier — weak cites land in the critic prompt", async () => {
+  const planJson = '{"queries":["q1"]}';
+  // Round 0 synth: cites [1] for content not in source 1's text
+  // (LOREM is about rate limits; this draft mentions mongoose-jellyfish).
+  const synth1 = "The system uses a jellyfish-mongoose protocol [1].";
+  // We capture the critique request so we can inspect what reached the
+  // LLM. The critique can return any reasonable JSON.
+  const critiqueJson = '{"done": false, "queries": ["jellyfish mongoose protocol authoritative"]}';
+  const synth2 = "Better answer [1][2].";
+  const { server, calls } = makeLLMServer([
+    planJson,
+    synth1,
+    critiqueJson,
+    synth2,
+  ]);
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/a", title: "A", snippet: "" }],
+    "jellyfish mongoose protocol authoritative": [
+      { url: "https://ex.com/b", title: "B", snippet: "" },
+    ],
+  });
+  const pages = {
+    "https://ex.com/a": { text: LOREM, title: "A" },
+    "https://ex.com/b": { text: LOREM, title: "B" },
+  };
+
+  try {
+    await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 1,
+      concurrency: 2,
+      browserFactory: mockBrowserFactory(pages),
+    });
+    // calls[2] is the critique LLM request. Its user message should
+    // include the weakly-supported sentence flagged by the in-loop
+    // verifier.
+    const critiquePayload = calls[2];
+    const userText = critiquePayload.messages[0].content;
+    assert.match(
+      userText,
+      /Sentences with weak citations/,
+      "critique message includes the weak-cite section",
+    );
+    assert.match(
+      userText,
+      /jellyfish-mongoose/,
+      "the offending sentence is surfaced to the critic",
+    );
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: domain deny-list drops matching candidates with fetch.skipped", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [
+      { url: "https://pinterest.com/post/x", title: "P", snippet: "" },
+      { url: "https://docs.anthropic.com/x", title: "D", snippet: "" },
+    ],
+  });
+  const pages = {
+    "https://docs.anthropic.com/x": { text: LOREM, title: "Docs" },
+  };
+  const events = [];
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      domainFilter: { allow: [], deny: ["pinterest.com"] },
+      browserFactory: mockBrowserFactory(pages),
+      onEvent: (e) => {
+        if (e.type === "fetch.skipped") events.push(e);
+      },
+    });
+    assert.equal(result.sources.length, 1, "only the docs source was kept");
+    assert.equal(result.sources[0].url, "https://docs.anthropic.com/x");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].reason, "domain-deny");
+    assert.equal(events[0].url, "https://pinterest.com/post/x");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: domain allow-list keeps only matching candidates", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [
+      { url: "https://pinterest.com/post/x", title: "P", snippet: "" },
+      { url: "https://api.github.com/x", title: "G", snippet: "" },
+    ],
+  });
+  const pages = {
+    "https://api.github.com/x": { text: LOREM, title: "GH" },
+  };
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      // Subdomain match — github.com pattern matches api.github.com.
+      domainFilter: { allow: ["github.com"], deny: [] },
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.equal(result.sources.length, 1);
+    assert.equal(result.sources[0].url, "https://api.github.com/x");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("agent: --include ingests local files as pre-fetched sources", async () => {
   const planJson = '{"queries":["q1"]}';
   const synthText = "Combined answer [1][2].";

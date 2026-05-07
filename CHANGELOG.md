@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-06
+
+Three independent features that round out the major surface for v1: the verifier and critic now talk to each other, the LLM client speaks OpenAI Chat Completions natively, and the planner's URL picks can be filtered by hostname.
+
+### Added — verifier feeds the critic (closes the v0.5.0 loop)
+
+In `--deep` mode, the citation verifier now runs once per round (not just at the end). When intermediate rounds produce sentences with weak citations, those sentences are forwarded to the critic in the next round's prompt as top-priority gaps to fill. The critic system prompt was updated to surface this signal explicitly: when weak cites are present, queries should target authoritative sources for the specific flagged claims rather than generic re-searches.
+
+- New `WeakCite` type and optional `weakCites` parameter on `critique()` (additive — existing callers unaffected).
+- `parseCritique` / `Critique` shape unchanged; only the user message construction changes.
+- The end-of-run verifier pass that produces the user-facing `verification` report still runs once after the loop exits — that hasn't moved.
+
+This is the v2 of v0.5.0 that was explicitly out-of-scope at v0.5.0 time. Now in scope and shipping.
+
+### Added — OpenAI-compatible endpoint support (`src/llm-format.ts`, ~140 lines)
+
+deepdive's pipeline is built around the Anthropic Messages shape because that's dario's native protocol. v0.8.0 adds a request/response adapter so the same pipeline talks transparently to any OpenAI Chat Completions endpoint — OpenAI itself, vLLM, Ollama, LiteLLM in OpenAI mode, etc.
+
+- Auto-detection from `--base-url`: `api.openai.com`, `:11434` (Ollama default), and `:8000` (common vLLM port) all map to `openai`. Everything else stays on `anthropic` (preserves dario's behavior). Override with `--api-format=anthropic|openai` or `DEEPDIVE_API_FORMAT`.
+- New module `src/llm-format.ts` exporting `detectApiFormat`, `toOpenAIRequest`, `fromOpenAIResponse`, `openaiSSEToAnthropic`, `authHeadersFor`, `pathFor`, plus the request/response/SSE shape types. All pure.
+- Streaming works too — the SSE adapter translates `choices[].delta.content` frames to `content_block_delta` and final `usage` frames to `message_delta` on the fly. OpenAI streaming requests automatically get `stream_options.include_usage: true` so token counts still arrive.
+- Auth headers swap automatically: `authorization: Bearer …` for OpenAI; `x-api-key` + `anthropic-version: 2023-06-01` for Anthropic.
+- `LLMConfig.apiFormat?: ApiFormat` for library consumers.
+
+```bash
+# Local Ollama (auto-detected):
+deepdive "explain how X works" --base-url=http://localhost:11434 --model=llama3.1
+
+# OpenAI directly:
+deepdive "..." --base-url=https://api.openai.com --api-key=$OPENAI_API_KEY --model=gpt-4o
+```
+
+Cost telemetry still works for OpenAI-shape endpoints; users plug in their own per-MTok numbers via `DEEPDIVE_PRICE_INPUT_PER_MTOK` / `DEEPDIVE_PRICE_OUTPUT_PER_MTOK` since the built-in table only covers Claude models.
+
+### Added — domain allow / deny list (`src/domain-filter.ts`, ~60 lines)
+
+Two new CLI flags applied between search and fetch:
+
+- `--allow-domain=<list>` — keep only URLs whose hostname matches at least one comma-separated pattern.
+- `--deny-domain=<list>` — drop URLs whose hostname matches any pattern.
+
+Hostname-suffix matching: `github.com` matches `github.com` and `api.github.com` but not `githubcompany.com`. Filtered URLs surface as `fetch.skipped` events with reasons `domain-deny` or `domain-not-allowed` and never count toward fetches. Both flags can be combined; env equivalents `DEEPDIVE_ALLOW_DOMAIN` / `DEEPDIVE_DENY_DOMAIN`.
+
+- New module `src/domain-filter.ts` exporting `classifyUrl`, `matchesAny`, `normalizePattern`, `parseDomainList`, plus types. All pure.
+- `AgentConfig.domainFilter?: DomainFilter` for library consumers.
+- New `fetch.skipped` reasons in the agent event union.
+
+### Tests
+
+38 new across `test/llm-format.test.mjs` (15 — adapter pure tests covering request/response/SSE/headers/path), `test/domain-filter.test.mjs` (12 — classification, hostname-suffix lookalike rejection, allow/deny precedence, malformed-URL passthrough), `test/agent-loop.test.mjs` (3 — critic-verifier weak-cite forwarding, deny-list end-to-end, allow-list end-to-end), `test/llm-retry.test.mjs` (1 — OpenAI request/response round-trip via mock server), plus 8 CLI/config flag-plumbing tests across both new flags and the api-format auto-detect / flag / env precedence chain. Total test footprint now 352 across 9 suites.
+
 ## [0.7.0] - 2026-05-06
 
 Adds **PDF source support** and **local file ingestion** — the two biggest content-coverage gaps left in deepdive. Real research questions hit PDFs constantly (academic papers, RFCs, standards bodies); the most useful sources are often already on the user's laptop (project notes, internal docs). Both now work.

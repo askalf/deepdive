@@ -15,6 +15,13 @@ import {
   type LLMMessage,
   type LLMResult,
 } from "./llm.js";
+import {
+  authHeadersFor,
+  detectApiFormat,
+  openaiSSEToAnthropic,
+  pathFor,
+  toOpenAIRequest,
+} from "./llm-format.js";
 
 export interface StreamOptions {
   onToken?: (text: string) => void;
@@ -27,13 +34,27 @@ export async function callLLMStream(
   opts: StreamOptions = {},
   signal?: AbortSignal,
 ): Promise<LLMResult> {
-  const url = `${trimTrailingSlashes(config.baseUrl)}/v1/messages`;
-  const body = {
+  const format = config.apiFormat ?? detectApiFormat(config.baseUrl);
+  const url = `${trimTrailingSlashes(config.baseUrl)}${pathFor(format)}`;
+  const anthropicBody = {
     model: config.model,
     max_tokens: config.maxTokens,
     system,
     messages,
     stream: true,
+  };
+  const body =
+    format === "openai" ? toOpenAIRequest(anthropicBody) : anthropicBody;
+  // OpenAI's streaming endpoint requires `stream_options.include_usage`
+  // to report token counts in the final SSE event.
+  if (format === "openai") {
+    (body as unknown as Record<string, unknown>).stream_options = {
+      include_usage: true,
+    };
+  }
+  const headers = {
+    ...authHeadersFor(format, config.apiKey),
+    accept: "text/event-stream",
   };
   const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
   const attempts = Math.max(1, config.maxAttempts ?? DEFAULT_LLM_ATTEMPTS);
@@ -46,12 +67,7 @@ export async function callLLMStream(
       const combined = makeTimeoutSignal(timeoutMs, signal);
       const r = await fetch(url, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "anthropic-version": "2023-06-01",
-          "x-api-key": config.apiKey,
-          accept: "text/event-stream",
-        },
+        headers,
         body: JSON.stringify(body),
         signal: combined,
       });
@@ -86,7 +102,9 @@ export async function callLLMStream(
   let text = "";
   let usage: LLMResult["usage"];
 
-  for await (const event of parseSSE(res.body, signal)) {
+  for await (const raw of parseSSE(res.body, signal)) {
+    const event =
+      format === "openai" ? openaiSSEToAnthropic(raw) ?? raw : raw;
     const type = event.type;
     if (type === "content_block_delta" && event.delta?.type === "text_delta") {
       const chunk = event.delta.text ?? "";

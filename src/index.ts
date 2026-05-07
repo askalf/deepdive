@@ -79,6 +79,29 @@ export {
   type LocalIngestResult,
 } from "./local.js";
 export {
+  classifyUrl,
+  matchesAny,
+  normalizePattern,
+  parseDomainList,
+  type DomainFilter,
+  type DomainVerdict,
+} from "./domain-filter.js";
+export {
+  detectApiFormat,
+  toOpenAIRequest,
+  fromOpenAIResponse,
+  openaiSSEToAnthropic,
+  authHeadersFor,
+  pathFor,
+  type ApiFormat,
+  type AnthropicRequestBody,
+  type OpenAIRequestBody,
+  type AnthropicResponseShape,
+  type OpenAIResponseShape,
+  type AnthropicSSEEvent,
+  type OpenAIStreamEvent,
+} from "./llm-format.js";
+export {
   verifyCitations,
   splitSentences,
   extractCiteIds,
