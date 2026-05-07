@@ -46,14 +46,29 @@ export interface OpenAIResponseShape {
 
 // Auto-detect from base URL. Honors known patterns; defaults to anthropic.
 // Exported for unit tests.
+//
+// We parse the URL properly and inspect the hostname / port rather than
+// substring-matching the raw string. CodeQL flagged the substring form
+// as an incomplete-URL-sanitization risk: a string like
+// "http://evil.example/?api.openai.com" would have matched.
 export function detectApiFormat(baseUrl: string): ApiFormat {
-  const lower = baseUrl.toLowerCase();
-  // openai.com — official API
-  if (lower.includes("api.openai.com")) return "openai";
-  // Ollama default — exposes OpenAI-compat at /v1
-  if (/:11434(\b|\/)/.test(lower)) return "openai";
-  // Common vLLM port
-  if (/:8000(\b|\/)/.test(lower)) return "openai";
+  let host: string;
+  let port: string;
+  try {
+    const u = new URL(baseUrl);
+    host = u.hostname.toLowerCase();
+    port = u.port;
+  } catch {
+    return "anthropic";
+  }
+  // OpenAI's official API — exact host or any subdomain of openai.com.
+  if (host === "api.openai.com" || host.endsWith(".openai.com")) {
+    return "openai";
+  }
+  // Ollama default — exposes OpenAI-compat at /v1.
+  if (port === "11434") return "openai";
+  // Common vLLM port.
+  if (port === "8000") return "openai";
   // LiteLLM proxies — convention is :4000 in their docs but it's not
   // dispositive. Default to anthropic to avoid false positives; users
   // can pass --api-format=openai explicitly.

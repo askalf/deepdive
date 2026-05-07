@@ -32,6 +32,31 @@ test("detectApiFormat: vLLM-conventional :8000 → openai", () => {
   assert.equal(detectApiFormat("http://localhost:8000"), "openai");
 });
 
+test("detectApiFormat: rejects URL spoofing api.openai.com in path/query", () => {
+  // CodeQL caught the substring form: a URL like
+  // http://evil.example/?api.openai.com would have matched. Hostname
+  // parsing is the right defense.
+  assert.equal(
+    detectApiFormat("http://evil.example/?api.openai.com"),
+    "anthropic",
+  );
+  assert.equal(
+    detectApiFormat("https://evil.example/api.openai.com/v1"),
+    "anthropic",
+  );
+});
+
+test("detectApiFormat: malformed URL → anthropic (default)", () => {
+  assert.equal(detectApiFormat("not a url"), "anthropic");
+});
+
+test("detectApiFormat: openai.com subdomains other than api → openai", () => {
+  // A user pointing at a custom subdomain of openai.com (e.g. an
+  // azure-fronted endpoint that resolves to oai-eus.openai.com) should
+  // still be detected as openai-format.
+  assert.equal(detectApiFormat("https://oai-eus.openai.com/v1"), "openai");
+});
+
 // ── toOpenAIRequest ─────────────────────────────────────────────────────────
 
 test("toOpenAIRequest: prepends system as a role=system message", () => {
