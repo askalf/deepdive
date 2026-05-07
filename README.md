@@ -116,6 +116,8 @@ The critic reads its own draft, flags gaps ("the draft didn't source the 429 hea
 
 Bare `--deep` = 2 extra rounds. `--deep=5` = up to 5. `--deep=0` is explicit single-pass.
 
+In a TTY, every round's draft streams as it's written — round 0 lands under the question's H1; subsequent rounds are separated by a `---` divider and a `## Round N (deep)` header so you can read along as the agent iterates. The final round is whichever one the critic declared `done` on, or the round you set as the ceiling. The `--out` file gets only the final markdown answer; the streamed intermediate drafts are visible in the terminal but not persisted there.
+
 **Why this is the whole point.** The critic loop is the axis hosted tools cap on. Per-query unit economics force them to ship a fixed depth — if they let you run a 5-round loop, some users would and their margins would collapse. On your own subscription, the only cap is the one you set on the command line.
 
 ---
@@ -240,6 +242,7 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | `--allow-domain=<list>` | — | Comma-separated hostname suffixes — keep only matching URLs. |
 | `--deny-domain=<list>` | — | Comma-separated hostname suffixes — drop matching URLs. |
 | `--api-format=<anthropic\|openai>` | auto | Wire format for the LLM endpoint. Auto-detected from `--base-url`. |
+| `--no-sessions` | off | Don't persist this run to `~/.deepdive/sessions/`. |
 | `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, cost, usage}` for piping. |
 | `--out=<path>` | — | Save to file. |
 | `--verbose`, `-v` | — | Stream plan / search / fetch / critique / verify events to stderr. |
@@ -309,6 +312,30 @@ Exit code is 1 if anything's broken, 0 otherwise. `--json` for structured output
 Every successful fetch goes to `~/.deepdive/cache/<sha256>.json` with a 1-hour TTL. A re-run of the same question — or a follow-up run that re-fetches overlapping URLs — never re-opens Chromium for sources it already has. Iteration during question refinement is free.
 
 Disable with `--no-cache` or `DEEPDIVE_NO_CACHE=1`. Change the dir with `DEEPDIVE_CACHE_DIR`. Change the TTL with `--cache-ttl-ms` or `DEEPDIVE_CACHE_TTL_MS`.
+
+---
+
+## Sessions
+
+Every successful run is saved to `~/.deepdive/sessions/<id>.json` — the full plan, round trace, kept sources (with their extracted content), the answer, the verification report, and the cost estimate. After each run deepdive prints the session id on stderr:
+
+```
+session  2026-05-07_134509_5959f102  (deepdive resume 2026-05-07_134509_5959f102)
+```
+
+Three subcommands operate on saved sessions:
+
+```bash
+deepdive sessions ls                         # newest first; id, age, source/round counts, question
+deepdive show <id>                           # re-print the original markdown answer
+deepdive resume <id> [<new-question>]        # re-synthesize against the saved sources
+```
+
+`resume` is the headline: it re-runs the synthesizer (one LLM call) against the existing source corpus, optionally with a new question or refinement. No re-search, no re-fetch, no critic loop. This closes the iteration loop that the page cache opens — the cache stops re-fetching pages, but `resume` stops re-running the entire pipeline. Refining "what does X say about Y" into "what does X say about Y in the post-2024 era" costs one synthesis instead of an entire deep run.
+
+IDs are timestamp-prefixed (`YYYY-MM-DD_HHMMSS_<8-hex>`), so they sort chronologically and you can pass a unique prefix instead of typing the full id (`deepdive resume 2026-05-07_134509`).
+
+Disable with `--no-sessions` or `DEEPDIVE_NO_SESSIONS=1`. Change the dir with `DEEPDIVE_SESSIONS_DIR`.
 
 ---
 

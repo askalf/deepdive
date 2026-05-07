@@ -87,6 +87,19 @@ export {
   type DomainVerdict,
 } from "./domain-filter.js";
 export {
+  generateSessionId,
+  saveSession,
+  loadSession,
+  listSessions,
+  resolveSessionId,
+  renderSessionsList,
+  defaultSessionsDir,
+  humanDuration,
+  type SessionRecord,
+  type SessionMeta,
+  type SessionStorageOptions,
+} from "./sessions.js";
+export {
   detectApiFormat,
   toOpenAIRequest,
   fromOpenAIResponse,

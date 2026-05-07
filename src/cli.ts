@@ -16,13 +16,23 @@ import { resolveConfig, type CLIFlags } from "./config.js";
 import { resolveSearchAdapter } from "./search.js";
 import { runAgent, type AgentEvent } from "./agent.js";
 import { createCache } from "./cache.js";
-import { renderSourcesMarkdown } from "./citations.js";
-import type { VerificationReport } from "./verify.js";
+import { renderSourcesMarkdown, renderAnswerMarkdown } from "./citations.js";
+import { synthesize } from "./synthesize.js";
+import { verifyCitations as runVerify, type VerificationReport } from "./verify.js";
 import {
   formatCostLine,
   looksLikeDario,
+  estimateCost,
   type CostEstimate,
 } from "./pricing.js";
+import {
+  generateSessionId,
+  saveSession,
+  loadSession,
+  listSessions,
+  resolveSessionId,
+  renderSessionsList,
+} from "./sessions.js";
 import {
   runDoctor,
   renderDoctorText,
@@ -34,9 +44,13 @@ import {
 const USAGE = `deepdive — local research agent
 
 Usage:
-  deepdive "<question>" [flags]      Run the research agent
-  deepdive doctor [flags]            Health check — paste the output when filing issues
-  deepdive --help                    Show this help
+  deepdive "<question>" [flags]            Run the research agent
+  deepdive doctor [flags]                  Health check — paste the output when filing issues
+  deepdive sessions ls                     List saved sessions, newest first
+  deepdive show <id>                       Print a saved session's markdown answer
+  deepdive resume <id> [<question>]        Re-synthesize against a saved session's
+                                           sources (cheap iteration; no re-fetching)
+  deepdive --help                          Show this help
 
 Flags:
   --base-url=<url>              LLM endpoint. Default: http://localhost:3456 (dario)
@@ -80,8 +94,9 @@ Flags:
   --out=<path>                  Write the output (markdown or json) to a file too
   --verbose, -v                 Stream progress events to stderr
   --no-stream                   Buffer the final answer instead of streaming
-                                tokens to stdout (auto-off for --json, deep
-                                mode, and non-TTY stdout)
+                                tokens to stdout (auto-off for --json and
+                                non-TTY stdout)
+  --no-sessions                 Do not persist this run to ~/.deepdive/sessions/
   --help, -h                    Show this help
 
 Environment:
@@ -94,20 +109,33 @@ Environment:
   DEEPDIVE_NO_VERIFY_CITES, DEEPDIVE_STRICT_CITES, DEEPDIVE_CITE_MIN_RECALL,
   DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK,
   DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES,
-  DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_API_FORMAT
+  DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_API_FORMAT,
+  DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR
 `;
 
 interface ParsedArgs {
+  // For the default research case, this is the user's question. For
+  // subcommand cases (doctor / sessions / show / resume), this is the
+  // subcommand verb.
   question?: string;
+  // Subcommand-only — extra positional arguments after the verb.
+  // Empty for the default research case.
+  extras: string[];
   outPath?: string;
   flags: CLIFlags;
   help: boolean;
 }
 
+// Verbs that accept additional positional arguments. Anything else
+// triggers the "wrap your question in quotes" error when more than one
+// positional shows up.
+const SUBCOMMAND_VERBS = new Set(["doctor", "sessions", "show", "resume"]);
+
 // Exported for unit tests.
 export function parseArgs(argv: string[]): ParsedArgs {
   const flags: CLIFlags = {};
   let question: string | undefined;
+  const extras: string[] = [];
   let outPath: string | undefined;
   let help = false;
 
@@ -138,6 +166,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--no-cost") {
       flags.noCost = true;
+      continue;
+    }
+    if (a === "--no-sessions") {
+      flags.noSessions = true;
       continue;
     }
     if (a === "--json") {
@@ -248,12 +280,20 @@ export function parseArgs(argv: string[]): ParsedArgs {
       question = a;
       continue;
     }
+    // Subcommand verbs (doctor / sessions / show / resume) take extra
+    // positional arguments — capture them. Everything else gets the
+    // "wrap the question in quotes" error so users don't accidentally
+    // run an unquoted multi-word question.
+    if (question !== undefined && SUBCOMMAND_VERBS.has(question)) {
+      extras.push(a);
+      continue;
+    }
     throw new Error(
       `unexpected positional argument: ${JSON.stringify(a)}. Wrap the question in quotes.`,
     );
   }
 
-  return { question, outPath, flags, help };
+  return { question, extras, outPath, flags, help };
 }
 
 function parsePositiveInt(s: string): number | undefined {
@@ -395,6 +435,15 @@ async function main(argv: string[]): Promise<number> {
     process.stdout.write(out);
     return exitCodeFor(report);
   }
+  if (parsed.question === "sessions") {
+    return await sessionsCommand(parsed);
+  }
+  if (parsed.question === "show") {
+    return await showCommand(parsed);
+  }
+  if (parsed.question === "resume") {
+    return await resumeCommand(parsed);
+  }
   if (!parsed.question) {
     process.stderr.write(`deepdive: missing question.\n\n${USAGE}`);
     return 2;
@@ -445,6 +494,19 @@ async function main(argv: string[]): Promise<number> {
         env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
+          // In --deep streaming mode, prefix each round-after-the-first
+          // synth with a separator + header so users can tell where one
+          // draft ends and the next begins. Round 0's header is the
+          // question (already printed above).
+          if (
+            streaming &&
+            e.type === "synthesize.start" &&
+            e.round > 0
+          ) {
+            process.stdout.write(
+              `\n\n---\n\n## Round ${e.round} (deep)\n\n`,
+            );
+          }
         },
         onSynthesizeToken: streaming
           ? (chunk) => {
@@ -460,6 +522,22 @@ async function main(argv: string[]): Promise<number> {
     const strictFail =
       config.strictCitations &&
       (result.verification?.unsupported.length ?? 0) > 0;
+
+    // Persist the session before printing output. We do this even when
+    // --strict-cites is going to make us exit 1 — the run happened, the
+    // sources are real, and the user might want to inspect via `show`.
+    let sessionId: string | undefined;
+    if (config.sessions.enabled) {
+      try {
+        sessionId = await persistSession(parsed.question, result, config);
+      } catch (err) {
+        // Persistence failure is non-fatal — surface a warning to stderr
+        // but don't break the run.
+        process.stderr.write(
+          `deepdive: warning: failed to save session (${safeErrorMessage(err)})\n`,
+        );
+      }
+    }
 
     // Cost summary lands on stderr regardless of stdout mode (suppressed by
     // --no-cost / DEEPDIVE_NO_COST=1, and skipped for --json since the data
@@ -482,6 +560,7 @@ async function main(argv: string[]): Promise<number> {
         process.stderr.write(`\nwrote ${path}\n`);
       }
       if (costLine) process.stderr.write(costLine + "\n");
+      if (sessionId) writeSessionHint(sessionId);
       return strictFail ? 1 : 0;
     }
 
@@ -517,6 +596,158 @@ async function main(argv: string[]): Promise<number> {
       process.stderr.write(`\nwrote ${path}\n`);
     }
     if (costLine) process.stderr.write(costLine + "\n");
+    if (sessionId) writeSessionHint(sessionId);
+    return strictFail ? 1 : 0;
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return 1;
+  } finally {
+    process.off("SIGINT", sigint);
+    process.off("SIGTERM", sigint);
+  }
+}
+
+// Persist a finished agent run as a session record. Returns the new id.
+async function persistSession(
+  question: string,
+  result: import("./agent.js").AgentResult,
+  config: import("./config.js").RuntimeConfig,
+): Promise<string> {
+  const id = generateSessionId();
+  const record = {
+    schema: 1 as const,
+    id,
+    createdAt: Date.now(),
+    question,
+    plan: result.plan,
+    rounds: result.rounds,
+    sources: result.sources,
+    answer: result.answer,
+    verification: result.verification,
+    cost: result.cost,
+    llm: { baseUrl: config.llm.baseUrl, model: config.llm.model },
+  };
+  await saveSession(record, { dir: config.sessions.dir });
+  return id;
+}
+
+function writeSessionHint(id: string): void {
+  process.stderr.write(`session  ${id}  (deepdive resume ${id})\n`);
+}
+
+async function sessionsCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const sub = parsed.extras[0] ?? "ls";
+  if (sub !== "ls") {
+    process.stderr.write(`deepdive: unknown sessions sub-command: ${sub}\n`);
+    return 2;
+  }
+  const { sessions, bad } = await listSessions({ dir: config.sessions.dir });
+  if (config.jsonOutput) {
+    process.stdout.write(JSON.stringify({ sessions, bad }, null, 2) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderSessionsList(sessions) + "\n");
+  if (bad.length > 0) {
+    process.stderr.write(
+      `\n(${bad.length} session file${bad.length === 1 ? "" : "s"} could not be parsed)\n`,
+    );
+  }
+  return 0;
+}
+
+async function showCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const idArg = parsed.extras[0];
+  if (!idArg) {
+    process.stderr.write(`deepdive: show requires a session id\n`);
+    return 2;
+  }
+  const id = await resolveSessionId(idArg, { dir: config.sessions.dir });
+  const record = await loadSession(id, { dir: config.sessions.dir });
+  // Re-render markdown from the stored answer + sources so it stays
+  // identical to what the original run printed.
+  const markdown = renderAnswerMarkdown(record.question, record.answer, record.sources);
+  process.stdout.write(markdown + (markdown.endsWith("\n") ? "" : "\n"));
+  return 0;
+}
+
+async function resumeCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const idArg = parsed.extras[0];
+  if (!idArg) {
+    process.stderr.write(`deepdive: resume requires a session id\n`);
+    return 2;
+  }
+  const id = await resolveSessionId(idArg, { dir: config.sessions.dir });
+  const record = await loadSession(id, { dir: config.sessions.dir });
+  const newQuestion = parsed.extras[1] ?? record.question;
+
+  // Re-synthesize against the existing source corpus. No search, no
+  // browser, no critic — this is the "I want to refine the question
+  // without re-spending tokens on retrieval" path.
+  const ac = new AbortController();
+  const sigint = () => ac.abort();
+  process.on("SIGINT", sigint);
+  process.on("SIGTERM", sigint);
+
+  let usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
+  const onUsage = (u: { input_tokens: number; output_tokens: number }) => {
+    usage.inputTokens += u.input_tokens ?? 0;
+    usage.outputTokens += u.output_tokens ?? 0;
+    usage.calls += 1;
+  };
+
+  const streaming =
+    config.streamEnabled &&
+    (process.stdout.isTTY || process.env.DEEPDIVE_FORCE_STREAM === "1");
+  let streamed = false;
+
+  try {
+    if (streaming) {
+      process.stdout.write(`# ${escapeHeader(newQuestion)}\n\n`);
+    }
+    const answer = await synthesize(
+      newQuestion,
+      record.sources,
+      config.llm,
+      ac.signal,
+      streaming
+        ? (chunk) => {
+            streamed = true;
+            process.stdout.write(chunk);
+          }
+        : undefined,
+      onUsage,
+    );
+
+    // Cite verification (final only — no in-loop because there's no loop)
+    let verification;
+    if (config.verifyCitations !== false && answer) {
+      verification = runVerify(answer, record.sources, {
+        threshold: config.citeMinRecall,
+      });
+    }
+    const citeFooter = renderCitationHealthFooter(verification);
+    const strictFail =
+      config.strictCitations && (verification?.unsupported.length ?? 0) > 0;
+
+    if (streaming && streamed) {
+      const tail = "\n\n" + renderSourcesMarkdown(record.sources) + citeFooter;
+      process.stdout.write(tail);
+      if (!tail.endsWith("\n")) process.stdout.write("\n");
+    } else {
+      const md = renderAnswerMarkdown(newQuestion, answer, record.sources);
+      process.stdout.write(md + (md.endsWith("\n") ? "" : "\n") + citeFooter);
+    }
+
+    if (config.costEnabled && !config.jsonOutput) {
+      const cost = estimateCost(usage, config.llm.model, process.env);
+      process.stderr.write(
+        renderCostSummary(cost, config.llm.model, config.llm.baseUrl) + "\n",
+      );
+    }
+    process.stderr.write(`session  resumed from ${id}\n`);
     return strictFail ? 1 : 0;
   } catch (err) {
     process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);

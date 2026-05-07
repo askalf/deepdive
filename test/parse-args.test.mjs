@@ -187,3 +187,43 @@ test("parseArgs: --api-format accepts anthropic and openai", () => {
 test("parseArgs: --api-format=other throws", () => {
   assert.throws(() => parseArgs(["q", "--api-format=mistral"]), /must be 'anthropic' or 'openai'/);
 });
+
+test("parseArgs: --no-sessions flag", () => {
+  const p = parseArgs(["q", "--no-sessions"]);
+  assert.equal(p.flags.noSessions, true);
+});
+
+test("parseArgs: 'sessions ls' captures the sub-verb in extras", () => {
+  const p = parseArgs(["sessions", "ls"]);
+  assert.equal(p.question, "sessions");
+  assert.deepEqual(p.extras, ["ls"]);
+});
+
+test("parseArgs: 'show <id>' captures the id in extras", () => {
+  const p = parseArgs(["show", "2026-05-07_120000_aabbccdd"]);
+  assert.equal(p.question, "show");
+  assert.deepEqual(p.extras, ["2026-05-07_120000_aabbccdd"]);
+});
+
+test("parseArgs: 'resume <id> <question>' captures both in extras", () => {
+  const p = parseArgs(["resume", "abc", "what about Y"]);
+  assert.equal(p.question, "resume");
+  assert.deepEqual(p.extras, ["abc", "what about Y"]);
+});
+
+test("parseArgs: 'doctor' takes no extras (still rejects unexpected positional now-allowed)", () => {
+  // doctor accepts extras (for forward-compat) but typically has none.
+  // The point: extras is empty in the simple call.
+  const p = parseArgs(["doctor"]);
+  assert.equal(p.question, "doctor");
+  assert.deepEqual(p.extras, []);
+});
+
+test("parseArgs: still rejects an unquoted multi-word question", () => {
+  // Sanity check that the verb-allowlist didn't accidentally let
+  // bare unquoted questions through.
+  assert.throws(
+    () => parseArgs(["how", "does", "X"]),
+    /unexpected positional/,
+  );
+});

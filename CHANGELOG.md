@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-05-07
+
+Adds **session persistence** — every successful run is saved to disk and can be listed, re-printed, or resumed for cheap iteration — and **streaming during `--deep`** with round-header separators between intermediate drafts. The two features compose: you can watch a deep run stream all four rounds, then `deepdive resume <id> "what about Y instead of X"` to spend one more synthesis call against the same source corpus.
+
+### Added — sessions (`src/sessions.ts`, ~190 lines, no new runtime deps)
+
+Every successful agent run is persisted as a JSON record at `~/.deepdive/sessions/<id>.json` (atomic `.tmp` + `rename` semantics, mirroring the page cache). The record carries the full plan, round trace, kept sources **with their extracted content**, the answer, the verification report, and the cost estimate — enough to re-synthesize without touching the network.
+
+- New module `src/sessions.ts` exporting `generateSessionId`, `saveSession`, `loadSession`, `listSessions`, `resolveSessionId`, `renderSessionsList`, `defaultSessionsDir`, `humanDuration`, plus `SessionRecord` / `SessionMeta` / `SessionStorageOptions` types.
+- IDs are timestamp-prefixed: `YYYY-MM-DD_HHMMSS_<8-hex>`. Sortable chronologically, recognizable, collision-resistant within a second. `resolveSessionId` accepts unique prefixes — `deepdive resume 2026-05-07_134509` is enough when only one session matches.
+- Three new subcommands:
+  - `deepdive sessions ls` — list newest first; columns are id, age, source count, round count, model, truncated question
+  - `deepdive show <id>` — re-render the original markdown answer + sources
+  - `deepdive resume <id> [<new question>]` — re-synthesize against the saved sources (one LLM call), optionally with a refined question. No re-search, no re-fetch, no critic loop.
+- New CLI flag `--no-sessions` and env vars `DEEPDIVE_NO_SESSIONS`, `DEEPDIVE_SESSIONS_DIR`.
+- After every run deepdive prints a one-line stderr hint: `session  <id>  (deepdive resume <id>)`.
+- Session persistence is non-fatal: a failure to save is reported as a warning to stderr but doesn't fail the run.
+- `AgentResult.sources` type tightened from `Source[]` to `SourceWithContent[]` — the runtime value was already `SourceWithContent`, so this is a type-only change. Library consumers reading `id` / `url` / `title` / `fetchedAt` are unaffected (`SourceWithContent extends Source`).
+
+```bash
+$ deepdive "how does claude's rate limiter work" --deep
+... (run completes) ...
+session  2026-05-07_134509_5959f102  (deepdive resume 2026-05-07_134509_5959f102)
+
+$ deepdive sessions ls
+  2026-05-07_134509_5959f102      8s ago  12 src · 3 round  how does claude's rate limiter work
+
+$ deepdive resume 2026-05-07_134509 "what changed in the 2024 redesign?"
+... new answer streams against the same 12 sources ...
+session  resumed from 2026-05-07_134509_5959f102
+```
+
+The cache solves "don't re-fetch URLs"; sessions solve "don't re-run the entire pipeline." Refining a question into a follow-up costs one LLM call instead of plan + N×search + N×fetch + N×synth + N×critique.
+
+### Changed — streaming during `--deep` mode
+
+`--deep` mode used to auto-disable streaming because intermediate rounds would print multiple full drafts back-to-back with no visual separation. v0.9 enables streaming again with a clear UX:
+
+- Round 0 streams under the question's H1 header (current single-pass behavior, unchanged).
+- Round 1+ each get a `\n\n---\n\n## Round N (deep)\n\n` separator before their tokens start streaming.
+- The terminal scrolls naturally as each round's draft writes itself.
+- `--out=file.md` still writes only the final answer's markdown — intermediate drafts are visible in the terminal but not persisted.
+- `--no-stream` and `--json` still suppress streaming as before.
+
+This is the v2 of the streaming UX from v0.3.0 that was scoped down to single-pass at the time. Now the headline `--deep` feature gets the same live-tokens treatment.
+
+### Tests
+
+23 new across `test/sessions.test.mjs` (15 — id format / round-trip / atomic write / schema rejection / list with bad files / prefix resolution including ambiguity / render), `test/parse-args.test.mjs` (6 — sessions/show/resume verbs capture extras; `--no-sessions`; sanity check that bare unquoted multi-word questions still throw), `test/config.test.mjs` (2 — sessions enabled/disabled, `DEEPDIVE_SESSIONS_DIR` override). Total test footprint now 378 across 10 suites. Existing streaming-config test updated to reflect the v0.9 behavior change.
+
 ## [0.8.0] - 2026-05-06
 
 Three independent features that round out the major surface for v1: the verifier and critic now talk to each other, the LLM client speaks OpenAI Chat Completions natively, and the planner's URL picks can be filtered by hostname.
