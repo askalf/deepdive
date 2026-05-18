@@ -61,6 +61,13 @@ export interface AgentConfig {
   // a `BudgetExceededError` is thrown (caught by the CLI; library
   // consumers can catch it directly). Undefined means no cap.
   maxCostUsd?: number;
+  // v0.12.0 — session continuation. Sources from a prior run are seeded
+  // into the kept-sources pool with their saved content intact; their
+  // URLs are added to seenUrls so the fetch loop doesn't re-fetch.
+  // Used by the `deepdive continue` subcommand; library consumers can
+  // pass any SourceWithContent[] (e.g. from a custom source feed).
+  // Ordering: include[] (local files) → preKept (saved) → search-fetched.
+  preKept?: SourceWithContent[];
   search: SearchAdapter;
   browser: BrowserOptions;
   resultsPerQuery: number;
@@ -272,6 +279,24 @@ export async function runAgent(
       ingested: local.sources.length,
       skipped: local.skipped.length,
     });
+  }
+
+  // v0.12.0 — session continuation. Pre-fetched sources from a saved
+  // session are placed in the kept-sources pool with their original
+  // content intact, and their URLs added to seenUrls so the fetch loop
+  // doesn't re-fetch what we already have. They appear in the synth's
+  // source packet alongside any new sources the planner brings in.
+  //
+  // preKept comes AFTER `include[]` so local-file ingestion takes
+  // precedence if both are set (rare, but the local-file path has
+  // explicit user intent attached — they passed a path on this run).
+  if (config.preKept && config.preKept.length > 0) {
+    for (const s of config.preKept) {
+      if (keptSources.length >= config.maxSources) break;
+      if (seenUrls.has(s.url)) continue;
+      keptSources.push({ ...s, id: keptSources.length + 1 });
+      seenUrls.add(s.url);
+    }
   }
 
   let browser: BrowserLike | null = null;

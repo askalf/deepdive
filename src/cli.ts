@@ -51,6 +51,9 @@ Usage:
   deepdive show <id>                       Print a saved session's markdown answer
   deepdive resume <id> [<question>]        Re-synthesize against a saved session's
                                            sources (cheap iteration; no re-fetching)
+  deepdive continue <id> [<question>]      Full agent run seeded with the saved session's
+                                           sources (plans + searches + fetches new pages;
+                                           saved as a new session linked via parentId)
   deepdive --help                          Show this help
 
 Flags:
@@ -138,7 +141,13 @@ interface ParsedArgs {
 // Verbs that accept additional positional arguments. Anything else
 // triggers the "wrap your question in quotes" error when more than one
 // positional shows up.
-const SUBCOMMAND_VERBS = new Set(["doctor", "sessions", "show", "resume"]);
+const SUBCOMMAND_VERBS = new Set([
+  "doctor",
+  "sessions",
+  "show",
+  "resume",
+  "continue",
+]);
 
 // Exported for unit tests.
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -502,12 +511,34 @@ async function main(argv: string[]): Promise<number> {
   if (parsed.question === "resume") {
     return await resumeCommand(parsed);
   }
+  if (parsed.question === "continue") {
+    return await continueCommand(parsed);
+  }
   if (!parsed.question) {
     process.stderr.write(`deepdive: missing question.\n\n${USAGE}`);
     return 2;
   }
 
   const config = resolveConfig(parsed.flags, process.env);
+  return await runResearch({ question: parsed.question, parsed, config });
+}
+
+// v0.12.0 — the shared research path used by both the default
+// `deepdive "<question>"` invocation and `deepdive continue <id>`.
+// Continue threads `preKept` (saved sources from the parent session)
+// and `parentId` (lineage backlink for the new record) without
+// duplicating the streaming / JSON / persistence / cost / SIGINT
+// plumbing that the default path already implements.
+interface RunResearchOptions {
+  question: string;
+  parsed: ParsedArgs;
+  config: import("./config.js").RuntimeConfig;
+  preKept?: import("./synthesize.js").SourceWithContent[];
+  parentId?: string;
+}
+
+async function runResearch(opts: RunResearchOptions): Promise<number> {
+  const { question, parsed, config, preKept, parentId } = opts;
   const search = await resolveSearchAdapter(config.searchAdapter, process.env);
   const cache = config.cache.enabled
     ? createCache({ dir: config.cache.dir, ttlMs: config.cache.ttlMs })
@@ -529,14 +560,15 @@ async function main(argv: string[]): Promise<number> {
 
   try {
     if (streaming) {
-      process.stdout.write(`# ${escapeHeader(parsed.question)}\n\n`);
+      process.stdout.write(`# ${escapeHeader(question)}\n\n`);
     }
     const result = await runAgent(
-      parsed.question,
+      question,
       {
         llm: config.llm,
         models: config.models,
         maxCostUsd: config.maxCostUsd,
+        preKept,
         search,
         browser: config.browser,
         resultsPerQuery: config.resultsPerQuery,
@@ -589,7 +621,7 @@ async function main(argv: string[]): Promise<number> {
     let sessionId: string | undefined;
     if (config.sessions.enabled) {
       try {
-        sessionId = await persistSession(parsed.question, result, config);
+        sessionId = await persistSession(question, result, config, parentId);
       } catch (err) {
         // Persistence failure is non-fatal — surface a warning to stderr
         // but don't break the run.
@@ -678,10 +710,13 @@ async function main(argv: string[]): Promise<number> {
 }
 
 // Persist a finished agent run as a session record. Returns the new id.
+// v0.12.0 — pass `parentId` to record the lineage when this run was
+// invoked via `deepdive continue <id>`.
 async function persistSession(
   question: string,
   result: import("./agent.js").AgentResult,
   config: import("./config.js").RuntimeConfig,
+  parentId?: string,
 ): Promise<string> {
   const id = generateSessionId();
   const record = {
@@ -696,6 +731,7 @@ async function persistSession(
     verification: result.verification,
     cost: result.cost,
     llm: { baseUrl: config.llm.baseUrl, model: config.llm.model },
+    ...(parentId ? { parentId } : {}),
   };
   await saveSession(record, { dir: config.sessions.dir });
   return id;
@@ -829,6 +865,38 @@ async function resumeCommand(parsed: ParsedArgs): Promise<number> {
     process.off("SIGINT", sigint);
     process.off("SIGTERM", sigint);
   }
+}
+
+// v0.12.0 — `deepdive continue <id> [<refined-question>]`. Unlike
+// `resume` (which is the cheap "re-ask the same corpus" path),
+// `continue` runs a full agent loop — search included — with the
+// saved sources seeded into the kept-sources pool. The new run is
+// persisted with `parentId` set to the original id so the lineage
+// is recoverable. The typical use is: original run got close,
+// follow-up question wants the planner to fetch a few more pages
+// without losing the corpus the user already paid for.
+async function continueCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const idArg = parsed.extras[0];
+  if (!idArg) {
+    process.stderr.write(
+      `deepdive: continue requires a session id (try \`deepdive sessions ls\`)\n`,
+    );
+    return 2;
+  }
+  const id = await resolveSessionId(idArg, { dir: config.sessions.dir });
+  const record = await loadSession(id, { dir: config.sessions.dir });
+  // Refined question wins; falls back to the parent's. Lets the user
+  // type just `deepdive continue <id>` to run again from where they
+  // left off with new search results.
+  const newQuestion = parsed.extras[1] ?? record.question;
+  return await runResearch({
+    question: newQuestion,
+    parsed,
+    config,
+    preKept: record.sources,
+    parentId: id,
+  });
 }
 
 // Only run main() when invoked as a script, not when imported (e.g. by tests

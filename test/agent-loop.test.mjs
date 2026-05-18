@@ -724,6 +724,113 @@ test("agent: --include ingests local files as pre-fetched sources", async () => 
   }
 });
 
+test("agent: preKept (v0.12.0 continue) seeds saved sources alongside fresh search results", async () => {
+  // Simulates `deepdive continue <id> [<question>]` — the saved
+  // session's sources are passed in as preKept; the agent still does a
+  // full search/fetch round and they appear together in the synth
+  // packet.
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer drawing on both [1] and [2].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/fresh", title: "Fresh", snippet: "" }],
+  });
+  const pages = { "https://ex.com/fresh": { text: LOREM, title: "fresh page" } };
+
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      preKept: [
+        {
+          id: 99, // intentionally bogus — agent must re-id sequentially
+          url: "https://ex.com/saved",
+          title: "Saved page",
+          fetchedAt: Date.now() - 86400000,
+          content: "uniqueSavedTokenXYZ specific fact carried over",
+        },
+      ],
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.equal(result.sources.length, 2, "preKept + 1 fresh fetched");
+    // preKept comes after include[] but before search — so id=1 here
+    // (no include[] in this run). Original bogus id=99 is replaced.
+    assert.equal(result.sources[0].id, 1);
+    assert.equal(result.sources[0].url, "https://ex.com/saved");
+    assert.match(result.sources[0].content, /uniqueSavedTokenXYZ/);
+    assert.equal(result.sources[1].id, 2);
+    assert.equal(result.sources[1].url, "https://ex.com/fresh");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: preKept dedupes against fresh search results (no re-fetch of saved URLs)", async () => {
+  // Critical correctness property: a URL already in preKept must not
+  // be re-fetched if the planner happens to surface it again. The
+  // user already paid the fetch cost on the parent session.
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1][2].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const tracker = { opened: 0, fetched: [] };
+  const search = mockSearch({
+    q1: [
+      { url: "https://ex.com/saved", title: "Saved", snippet: "" }, // dupe
+      { url: "https://ex.com/new", title: "New", snippet: "" },
+    ],
+  });
+  const pages = {
+    "https://ex.com/saved": { text: LOREM, title: "would-be re-fetch" },
+    "https://ex.com/new": { text: LOREM, title: "new page" },
+  };
+
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      preKept: [
+        {
+          id: 1,
+          url: "https://ex.com/saved",
+          title: "Saved",
+          fetchedAt: Date.now() - 86400000,
+          content: "originalSavedContent",
+        },
+      ],
+      browserFactory: mockBrowserFactory(pages, tracker),
+    });
+    assert.equal(result.sources.length, 2, "saved (preKept) + new (fetched)");
+    // Saved URL must keep its ORIGINAL content (not a re-fetch).
+    const saved = result.sources.find((s) => s.url === "https://ex.com/saved");
+    assert.equal(saved.content, "originalSavedContent");
+    // And the browser must not have touched the saved URL.
+    assert.equal(
+      tracker.fetched.includes("https://ex.com/saved"),
+      false,
+      "saved URL is not re-fetched",
+    );
+    assert.deepEqual(tracker.fetched, ["https://ex.com/new"]);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("agent: routes PDF byte responses through the PDF extractor", async () => {
   const planJson = '{"queries":["q1"]}';
   const synthText = "Answer [1].";

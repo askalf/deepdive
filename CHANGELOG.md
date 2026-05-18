@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-18
+
+Adds **`deepdive continue <id> [<refined-question>]`** — a new subcommand that runs a *full* agent loop seeded with a saved session's sources. Unlike `resume` (which just re-synthesizes against the saved corpus — cheap, no fetches), `continue` plans + searches + fetches new pages with the parent's sources kept in the pool. Saved as a new session linked to the parent via a new `parentId` field on the record.
+
+### Added — `deepdive continue <id> [<refined-question>]`
+
+```bash
+# Original run.
+deepdive "how does Claude's rate limiter work?"
+# → session  2026-05-18_140312_abc12345
+
+# Inspect the answer, decide we want to drill deeper.
+deepdive continue 2026-05-18_140312 "specifically, what's the per-org vs per-key fallback?"
+# → session  2026-05-18_141207_def67890   (parentId: 2026-05-18_140312_abc12345)
+```
+
+What it does, step by step:
+1. Resolves the id prefix (same logic as `show` / `resume`).
+2. Loads the parent's `SessionRecord`.
+3. Runs `runAgent` with `preKept: record.sources` — the saved sources are seeded into the kept-sources pool, their URLs added to `seenUrls`, so the fetch loop *won't re-fetch what the parent already paid for*.
+4. Persists the result as a new session with `parentId` set to the parent's id.
+
+**Resume vs. continue** — pick by intent:
+
+| | `resume` | `continue` |
+|---|---|---|
+| Re-asks the LLM? | yes (synth only) | yes (full pipeline) |
+| Re-runs search? | no | yes |
+| Fetches new pages? | no | yes (deduped against parent sources) |
+| Cost profile | cheap (1 synth call) | similar to a fresh run |
+| Persisted as | not persisted | new session, `parentId` set |
+
+`resume` is for "I worded the question wrong, try again with the same sources." `continue` is for "this got close, now go further" — the parent's corpus rides along but the planner is free to expand it.
+
+### Internal
+
+- `src/agent.ts`: `AgentConfig` gains optional `preKept?: SourceWithContent[]`. After the `include[]` ingestion block (so local files still take precedence) and before the search loop, preKept entries are placed into the kept-sources pool with sequentially reassigned `id`s and their `url`s added to `seenUrls`. `maxSources` is respected — preKept may be partially truncated if the cap is small.
+- `src/sessions.ts`: `SessionRecord` gains optional `parentId?: string`. Additive — pre-v0.12.0 records load with `parentId === undefined`. No migration needed.
+- `src/cli.ts`: `continue` joins `SUBCOMMAND_VERBS`. `main()`'s research path extracted into a shared `runResearch({question, parsed, config, preKept?, parentId?})` helper used by both the default invocation and the new `continueCommand`. `persistSession` gains an optional `parentId` parameter, written into the record only when set so pre-v0.12.0 JSON shape is preserved for runs that don't use `continue`.
+
+### Tests
+
++6 new across:
+- `test/sessions.test.mjs` (2): `parentId` round-trips when set; pre-v0.12.0 records (no `parentId` on disk) load with `parentId === undefined`.
+- `test/agent-loop.test.mjs` (2): preKept seeds appear alongside fresh-fetched sources with reassigned sequential ids; preKept URLs dedupe against fresh search results — the saved URL is never re-fetched even when the planner surfaces it.
+- `test/parse-args.test.mjs` (2): `continue <id>` and `continue <id> <refined-question>` both parse correctly into `question` + `extras`.
+
+**423/423 default suite green** (417 prior + 6 new).
+
+### Why a minor bump
+
+New CLI subcommand (`continue`), new exported library surface (`preKept?: SourceWithContent[]` on `AgentConfig`, `parentId?: string` on `SessionRecord`), new on-disk session-record field (`parentId`). Purely additive — `resume`, `show`, and the default research path are byte-identical to v0.11.0 for runs that don't use `continue`.
+
 ## [0.11.0] - 2026-05-18
 
 Adds **`--max-cost`** — a hard budget cap on what a single run can spend. After each LLM call completes, the agent re-aggregates the cost across every model used (v0.10.0 multi-model layer) and throws `BudgetExceededError` if the running total crosses the cap. The CLI maps the error to a distinct exit code (2, vs 1 for real errors) so wrapping scripts can branch on it.
