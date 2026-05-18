@@ -34,6 +34,19 @@ export interface LLMConfig {
   apiFormat?: ApiFormat;
 }
 
+/**
+ * Return an LLMConfig identical to `base` except `model` is swapped to
+ * the provided value (v0.10.0 — per-stage model overrides). Pure;
+ * defensive shallow-copy so callers can mutate the result safely.
+ *
+ * The base config carries auth, base URL, wire format, timeouts — all
+ * shared across stages. Only `model` differs per phase, so this is the
+ * minimum useful surface for the override.
+ */
+export function withModel(base: LLMConfig, model: string): LLMConfig {
+  return { ...base, model };
+}
+
 export interface LLMMessage {
   role: "user" | "assistant";
   content: string;

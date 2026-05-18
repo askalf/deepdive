@@ -8,7 +8,7 @@
 // Fetching is concurrent (configurable via browser.concurrency) and optionally
 // backed by an on-disk cache (src/cache.ts) so re-running a question is cheap.
 
-import type { LLMConfig } from "./llm.js";
+import { withModel, type LLMConfig } from "./llm.js";
 import type { SearchAdapter } from "./search.js";
 import { dedupeByUrl } from "./search.js";
 import { planQueries, critique, type Plan, type Critique } from "./plan.js";
@@ -21,7 +21,10 @@ import {
   DEFAULT_CITE_MIN_RECALL,
   type VerificationReport,
 } from "./verify.js";
-import { estimateCost, type CostEstimate } from "./pricing.js";
+import {
+  estimateCostMultiModel,
+  type MultiModelCostEstimate,
+} from "./pricing.js";
 import {
   extractPdfText,
   PdfExtractorMissingError,
@@ -47,6 +50,10 @@ export interface BrowserLike {
 
 export interface AgentConfig {
   llm: LLMConfig;
+  // v0.10.0 — per-stage model overrides. Each falls back to `llm.model`
+  // when undefined. Library consumers who want a single model can omit
+  // this object entirely; the agent treats undefined-stage as "use base".
+  models?: { plan?: string; synth?: string; critique?: string };
   search: SearchAdapter;
   browser: BrowserOptions;
   resultsPerQuery: number;
@@ -121,6 +128,9 @@ export type AgentEvent =
       round: number;
       inputTokens: number;
       outputTokens: number;
+      // v0.10.0 — the model actually used for this call. Will equal
+      // config.llm.model for stages that don't override.
+      model: string;
     };
 
 export interface RoundTrace {
@@ -144,7 +154,10 @@ export interface AgentResult {
   markdown: string;
   rounds: RoundTrace[];
   verification?: VerificationReport;
-  cost: CostEstimate;
+  // v0.10.0: MultiModelCostEstimate (extends CostEstimate). Library
+  // consumers reading the existing `amountUsd` / `inputTokens` / etc.
+  // fields keep working; the new `byModel` array is additive.
+  cost: MultiModelCostEstimate;
   usage: {
     queries: number;
     fetched: number;
@@ -169,24 +182,49 @@ export async function runAgent(
   config: AgentConfig,
   signal?: AbortSignal,
 ): Promise<AgentResult> {
-  const llmTotals = { inputTokens: 0, outputTokens: 0, calls: 0 };
+  // v0.10.0 — per-phase LLM config. Each falls back to the base model
+  // when AgentConfig.models doesn't override that stage. The same auth /
+  // base URL / wire format flows through; only `model` differs.
+  const stageLLM: Record<"plan" | "synth" | "critique", LLMConfig> = {
+    plan: withModel(config.llm, config.models?.plan ?? config.llm.model),
+    synth: withModel(config.llm, config.models?.synth ?? config.llm.model),
+    critique: withModel(config.llm, config.models?.critique ?? config.llm.model),
+  };
+
+  // Per-model usage accumulator (v0.10.0). Pre-v0.10.0 used a single
+  // {inputTokens, outputTokens, calls} aggregator; the multi-model layer
+  // is a strict superset — when all three stages use the same model the
+  // map has one entry and reduces to the old shape.
+  const llmTotalsByModel: Record<string, { inputTokens: number; outputTokens: number; calls: number }> = {};
+  const totalsFor = (model: string) => {
+    let bucket = llmTotalsByModel[model];
+    if (!bucket) {
+      bucket = { inputTokens: 0, outputTokens: 0, calls: 0 };
+      llmTotalsByModel[model] = bucket;
+    }
+    return bucket;
+  };
+
   const usageSinkFor =
     (phase: "plan" | "synth" | "critique", round: number) =>
     (u: { input_tokens: number; output_tokens: number }) => {
-      llmTotals.inputTokens += u.input_tokens ?? 0;
-      llmTotals.outputTokens += u.output_tokens ?? 0;
-      llmTotals.calls += 1;
+      const model = stageLLM[phase].model;
+      const bucket = totalsFor(model);
+      bucket.inputTokens += u.input_tokens ?? 0;
+      bucket.outputTokens += u.output_tokens ?? 0;
+      bucket.calls += 1;
       emit(config, {
         type: "llm.call",
         phase,
         round,
         inputTokens: u.input_tokens ?? 0,
         outputTokens: u.output_tokens ?? 0,
+        model,
       });
     };
 
   emit(config, { type: "plan.start", question });
-  const plan = await planQueries(question, config.llm, signal, usageSinkFor("plan", 0));
+  const plan = await planQueries(question, stageLLM.plan, signal, usageSinkFor("plan", 0));
   emit(config, { type: "plan.done", plan });
 
   const seenUrls = new Set<string>();
@@ -350,7 +388,7 @@ export async function runAgent(
       answer = await synthesize(
         question,
         keptSources,
-        config.llm,
+        stageLLM.synth,
         signal,
         tokenSink,
         usageSinkFor("synth", round),
@@ -388,7 +426,7 @@ export async function runAgent(
           question,
           answer,
           allQueries,
-          config.llm,
+          stageLLM.critique,
           signal,
           usageSinkFor("critique", round),
           weakCites,
@@ -425,7 +463,19 @@ export async function runAgent(
     emit(config, { type: "verify.done", report: verification });
   }
 
-  const cost = estimateCost(llmTotals, config.llm.model, config.env);
+  // v0.10.0 — sum cost across every model used. When all stages share
+  // one model, this reduces to a single-model estimate (the pre-v0.10.0
+  // shape) with one entry in `byModel`.
+  const cost = estimateCostMultiModel(llmTotalsByModel, config.env);
+
+  // Aggregate llm totals for the `usage.llm` summary (kept stable for
+  // existing library consumers that read this shape).
+  const llmTotals = { inputTokens: 0, outputTokens: 0, calls: 0 };
+  for (const bucket of Object.values(llmTotalsByModel)) {
+    llmTotals.inputTokens += bucket.inputTokens;
+    llmTotals.outputTokens += bucket.outputTokens;
+    llmTotals.calls += bucket.calls;
+  }
 
   return {
     question,

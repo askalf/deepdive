@@ -280,3 +280,87 @@ test("parseUnitFloat: rejects out-of-range and non-numeric, accepts 0..1", () =>
   assert.equal(parseUnitFloat("abc"), undefined);
   assert.equal(parseUnitFloat(undefined), undefined);
 });
+
+// v0.10.0 — per-stage model overrides
+test("resolveConfig: per-stage models default to base model", () => {
+  const c = resolveConfig({ model: "claude-opus-4-7" }, {});
+  assert.equal(c.models.plan, "claude-opus-4-7");
+  assert.equal(c.models.synth, "claude-opus-4-7");
+  assert.equal(c.models.critique, "claude-opus-4-7");
+});
+
+test("resolveConfig: --plan-model overrides only plan, others stay on base", () => {
+  const c = resolveConfig(
+    { model: "claude-opus-4-7", planModel: "claude-haiku-4-5" },
+    {},
+  );
+  assert.equal(c.models.plan, "claude-haiku-4-5");
+  assert.equal(c.models.synth, "claude-opus-4-7");
+  assert.equal(c.models.critique, "claude-opus-4-7");
+});
+
+test("resolveConfig: --critic-model overrides only critic", () => {
+  const c = resolveConfig(
+    { model: "claude-opus-4-7", criticModel: "claude-haiku-4-5" },
+    {},
+  );
+  assert.equal(c.models.plan, "claude-opus-4-7");
+  assert.equal(c.models.synth, "claude-opus-4-7");
+  assert.equal(c.models.critique, "claude-haiku-4-5");
+});
+
+test("resolveConfig: DEEPDIVE_PLAN_MODEL / SYNTH_MODEL / CRITIC_MODEL env vars", () => {
+  const c = resolveConfig(
+    {},
+    {
+      DEEPDIVE_PLAN_MODEL: "haiku-plan",
+      DEEPDIVE_SYNTH_MODEL: "opus-synth",
+      DEEPDIVE_CRITIC_MODEL: "sonnet-critic",
+    },
+  );
+  assert.equal(c.models.plan, "haiku-plan");
+  assert.equal(c.models.synth, "opus-synth");
+  assert.equal(c.models.critique, "sonnet-critic");
+});
+
+test("resolveConfig: per-stage flag beats env beats base", () => {
+  const c = resolveConfig(
+    { model: "base-flag", planModel: "flag-plan" },
+    {
+      DEEPDIVE_PLAN_MODEL: "env-plan",
+      DEEPDIVE_SYNTH_MODEL: "env-synth",
+      DEEPDIVE_MODEL: "env-base",
+    },
+  );
+  // plan: per-stage flag wins over per-stage env
+  assert.equal(c.models.plan, "flag-plan");
+  // synth: no per-stage flag — per-stage env wins
+  assert.equal(c.models.synth, "env-synth");
+  // critique: no per-stage flag, no per-stage env — falls back to base
+  // model (which is the --model flag "base-flag", beating DEEPDIVE_MODEL)
+  assert.equal(c.models.critique, "base-flag");
+});
+
+test("resolveConfig: base env fills all stages when no per-stage flag/env", () => {
+  const c = resolveConfig({}, { DEEPDIVE_MODEL: "env-base" });
+  assert.equal(c.models.plan, "env-base");
+  assert.equal(c.models.synth, "env-base");
+  assert.equal(c.models.critique, "env-base");
+});
+
+test("resolveConfig: all three stages can use different models simultaneously", () => {
+  const c = resolveConfig(
+    {
+      model: "claude-sonnet-4-6",
+      planModel: "claude-haiku-4-5",
+      synthModel: "claude-opus-4-7",
+      criticModel: "claude-haiku-4-5",
+    },
+    {},
+  );
+  assert.equal(c.models.plan, "claude-haiku-4-5");
+  assert.equal(c.models.synth, "claude-opus-4-7");
+  assert.equal(c.models.critique, "claude-haiku-4-5");
+  // Base model unchanged — used as fallback only
+  assert.equal(c.llm.model, "claude-sonnet-4-6");
+});
