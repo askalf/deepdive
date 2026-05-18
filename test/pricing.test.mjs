@@ -219,3 +219,100 @@ test("drift constants exist and are coherent", () => {
   assert.ok(PRICE_TABLE_STALE_AFTER_DAYS >= 30);
   assert.ok(PRICE_TABLE_STALE_AFTER_DAYS <= 365);
 });
+
+// v0.10.0 — multi-model cost
+import { estimateCostMultiModel } from "../dist/pricing.js";
+
+test("estimateCostMultiModel: empty input → zero", () => {
+  const r = estimateCostMultiModel({});
+  assert.equal(r.amountUsd, 0);
+  assert.equal(r.calls, 0);
+  assert.equal(r.byModel.length, 0);
+  assert.equal(r.knownModel, false); // empty → not "known"
+});
+
+test("estimateCostMultiModel: single model behaves like estimateCost", () => {
+  const usage = {
+    "claude-sonnet-4-6": { inputTokens: 1000, outputTokens: 500, calls: 1 },
+  };
+  const r = estimateCostMultiModel(usage);
+  const single = estimateCost(
+    { inputTokens: 1000, outputTokens: 500, calls: 1 },
+    "claude-sonnet-4-6",
+  );
+  assert.equal(r.amountUsd, single.amountUsd);
+  assert.equal(r.inputTokens, 1000);
+  assert.equal(r.outputTokens, 500);
+  assert.equal(r.calls, 1);
+  assert.equal(r.byModel.length, 1);
+  assert.equal(r.byModel[0].model, "claude-sonnet-4-6");
+});
+
+test("estimateCostMultiModel: sums across two known models", () => {
+  // sonnet: $3/in, $15/out per MTok
+  // haiku:  $0.80/in, $4/out per MTok
+  const usage = {
+    "claude-sonnet-4-6": { inputTokens: 1_000_000, outputTokens: 500_000, calls: 2 },
+    "claude-haiku-4-5":  { inputTokens: 1_000_000, outputTokens: 500_000, calls: 5 },
+  };
+  const r = estimateCostMultiModel(usage);
+  // sonnet: 3 + 7.5 = 10.5; haiku: 0.8 + 2 = 2.8; total 13.3
+  assert.equal(r.amountUsd, 13.3);
+  assert.equal(r.calls, 7);
+  assert.equal(r.inputTokens, 2_000_000);
+  assert.equal(r.outputTokens, 1_000_000);
+  assert.equal(r.byModel.length, 2);
+  assert.equal(r.knownModel, true);
+});
+
+test("estimateCostMultiModel: stable ordering (sorted by model name)", () => {
+  const usage = {
+    "claude-sonnet-4-6": { inputTokens: 100, outputTokens: 100, calls: 1 },
+    "claude-haiku-4-5":  { inputTokens: 100, outputTokens: 100, calls: 1 },
+    "claude-opus-4-7":   { inputTokens: 100, outputTokens: 100, calls: 1 },
+  };
+  const r = estimateCostMultiModel(usage);
+  assert.deepEqual(
+    r.byModel.map((m) => m.model),
+    ["claude-haiku-4-5", "claude-opus-4-7", "claude-sonnet-4-6"],
+  );
+});
+
+test("estimateCostMultiModel: unknown model contributes $0 + flips knownModel false", () => {
+  const usage = {
+    "claude-sonnet-4-6":   { inputTokens: 1_000_000, outputTokens: 0, calls: 1 },
+    "self-hosted-llama-7b": { inputTokens: 1_000_000, outputTokens: 0, calls: 3 },
+  };
+  const r = estimateCostMultiModel(usage);
+  // sonnet contributes $3 (1M in @ $3/MTok), unknown $0
+  assert.equal(r.amountUsd, 3);
+  assert.equal(r.calls, 4);
+  assert.equal(r.knownModel, false); // one unknown → aggregate "not fully known"
+});
+
+test("estimateCostMultiModel: zero-usage buckets skipped", () => {
+  const usage = {
+    "claude-sonnet-4-6": { inputTokens: 0, outputTokens: 0, calls: 0 },
+    "claude-haiku-4-5":  { inputTokens: 100, outputTokens: 50, calls: 1 },
+  };
+  const r = estimateCostMultiModel(usage);
+  assert.equal(r.byModel.length, 1);
+  assert.equal(r.byModel[0].model, "claude-haiku-4-5");
+});
+
+test("estimateCostMultiModel: env override prices unknown models (knownModel stays false)", () => {
+  const usage = {
+    "self-hosted-1": { inputTokens: 1_000_000, outputTokens: 0, calls: 1 },
+    "self-hosted-2": { inputTokens: 1_000_000, outputTokens: 0, calls: 1 },
+  };
+  const r = estimateCostMultiModel(usage, {
+    DEEPDIVE_PRICE_INPUT_PER_MTOK: "1",
+    DEEPDIVE_PRICE_OUTPUT_PER_MTOK: "1",
+  });
+  // Both unknown but priced via env override → $1 each → $2 total.
+  // knownModel stays false because it specifically means "name is in
+  // the vendor PRICE_TABLE" (used by the CLI to decide ~$X vs $? display).
+  // Env-priced unknown models get the dollar amount but not the label.
+  assert.equal(r.amountUsd, 2);
+  assert.equal(r.knownModel, false);
+});

@@ -227,3 +227,34 @@ test("parseArgs: still rejects an unquoted multi-word question", () => {
     /unexpected positional/,
   );
 });
+
+// v0.10.0 — per-stage model flags
+test("parseArgs: --plan-model captured into flags.planModel", () => {
+  const p = parseArgs(["--plan-model=claude-haiku-4-5", "q"]);
+  assert.equal(p.flags.planModel, "claude-haiku-4-5");
+  assert.equal(p.question, "q");
+});
+
+test("parseArgs: --synth-model captured into flags.synthModel", () => {
+  const p = parseArgs(["--synth-model=claude-opus-4-7", "q"]);
+  assert.equal(p.flags.synthModel, "claude-opus-4-7");
+});
+
+test("parseArgs: --critic-model captured into flags.criticModel", () => {
+  const p = parseArgs(["--critic-model=claude-haiku-4-5", "q"]);
+  assert.equal(p.flags.criticModel, "claude-haiku-4-5");
+});
+
+test("parseArgs: all three per-stage model flags can coexist with --model", () => {
+  const p = parseArgs([
+    "--model=claude-sonnet-4-6",
+    "--plan-model=claude-haiku-4-5",
+    "--synth-model=claude-opus-4-7",
+    "--critic-model=claude-haiku-4-5",
+    "q",
+  ]);
+  assert.equal(p.flags.model, "claude-sonnet-4-6");
+  assert.equal(p.flags.planModel, "claude-haiku-4-5");
+  assert.equal(p.flags.synthModel, "claude-opus-4-7");
+  assert.equal(p.flags.criticModel, "claude-haiku-4-5");
+});

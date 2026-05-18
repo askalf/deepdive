@@ -11,6 +11,11 @@ import { defaultSessionsDir } from "./sessions.js";
 
 export interface RuntimeConfig {
   llm: LLMConfig;
+  // v0.10.0 — per-stage model overrides. `llm.model` is the base default;
+  // any of these three may override for that specific phase. CLI / env
+  // resolution is in resolveConfig below. When all three equal `llm.model`,
+  // the run looks identical to a pre-v0.10.0 single-model run.
+  models: { plan: string; synth: string; critique: string };
   browser: BrowserOptions;
   searchAdapter: string;
   resultsPerQuery: number;
@@ -37,6 +42,11 @@ export interface CLIFlags {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  // v0.10.0 — per-stage model overrides. Each falls back to `model`
+  // (then env, then default).
+  planModel?: string;
+  synthModel?: string;
+  criticModel?: string;
   maxTokens?: number;
   search?: string;
   resultsPerQuery?: number;
@@ -90,6 +100,13 @@ export function resolveConfig(
   const baseUrl = flags.baseUrl ?? env.DEEPDIVE_BASE_URL ?? DEFAULTS.baseUrl;
   const apiKey = flags.apiKey ?? env.DEEPDIVE_API_KEY ?? DEFAULTS.apiKey;
   const model = flags.model ?? env.DEEPDIVE_MODEL ?? DEFAULTS.model;
+  // Per-stage overrides — fall back to the base model when unset.
+  const planModel =
+    flags.planModel ?? env.DEEPDIVE_PLAN_MODEL ?? model;
+  const synthModel =
+    flags.synthModel ?? env.DEEPDIVE_SYNTH_MODEL ?? model;
+  const criticModel =
+    flags.criticModel ?? env.DEEPDIVE_CRITIC_MODEL ?? model;
   const maxTokens =
     flags.maxTokens ??
     parsePositiveInt(env.DEEPDIVE_MAX_TOKENS) ??
@@ -218,6 +235,11 @@ export function resolveConfig(
       timeoutMs: llmTimeoutMs,
       maxAttempts: llmAttempts,
       apiFormat,
+    },
+    models: {
+      plan: planModel,
+      synth: synthModel,
+      critique: criticModel,
     },
     browser: {
       headless: env.DEEPDIVE_HEADED === "1" ? false : true,

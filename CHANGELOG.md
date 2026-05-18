@@ -6,6 +6,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-18
+
+Adds **per-stage model overrides** — plan, synthesize, and critic can each run on a different model, paid against the right price tier. The pipeline already tagged every LLM call with `phase: "plan" | "synth" | "critique"` (since v0.6.0's cost telemetry); v0.10.0 lets you actually act on that tag.
+
+### Added — `--plan-model` / `--synth-model` / `--critic-model`
+
+Three optional CLI flags, three matching env vars (`DEEPDIVE_PLAN_MODEL`, `DEEPDIVE_SYNTH_MODEL`, `DEEPDIVE_CRITIC_MODEL`). Each falls back to `--model` / `DEEPDIVE_MODEL` / the default `claude-sonnet-4-6` when unset. Resolution precedence: per-stage flag > per-stage env > base flag > base env > default.
+
+```bash
+# Plan with cheap, synth with expensive, critic with cheap. Typical 60-70% cost cut
+# at synthesis-quality parity for a `--deep` run.
+deepdive "what changed in the python 3.13 GIL?" --deep \
+  --model=claude-sonnet-4-6 \
+  --plan-model=claude-haiku-4-5 \
+  --critic-model=claude-haiku-4-5
+
+cost · ~$0.034 · 12.1k in / 4.2k out · 7 LLM calls · multi-model
+     · ~$0.003 · 800 in / 200 out · 1 LLM call · claude-haiku-4-5    (plan)
+     · ~$0.001 · 600 in / 150 out · 3 LLM calls · claude-haiku-4-5   (critic)
+     · ~$0.030 · 10.7k in / 3.85k out · 3 LLM calls · claude-sonnet-4-6  (synth)
+     (≈ at API list price; $0 on Claude Max via dario)
+```
+
+### Changed — cost telemetry is now per-model
+
+`AgentResult.cost` is now `MultiModelCostEstimate` — a strict superset of the prior `CostEstimate`, with an added `byModel` array. Library consumers reading `amountUsd` / `inputTokens` / `outputTokens` / `calls` / `knownModel` keep working unchanged. The new `byModel` carries `{ model, estimate: CostEstimate }` for each model that actually saw a call, sorted alphabetically for deterministic ordering.
+
+When all stages run on the same model (the default and pre-v0.10.0 behavior), the cost summary renders identically — single-line `cost · ~$X.XX · ... · <model>`. When two or three models were used, the CLI prints an aggregate line plus per-model breakdown lines.
+
+### Changed — `llm.call` events carry the model used
+
+The `llm.call` event union gained a `model: string` field. Library consumers building their own cost UIs against the event stream can now break down by model. Existing consumers reading only `phase` / `round` / `inputTokens` / `outputTokens` are unaffected.
+
+### Internal
+
+- `src/llm.ts`: new pure helper `withModel(base, model)` — returns a fresh `LLMConfig` with `model` swapped, preserves auth/baseUrl/format/timeouts.
+- `src/pricing.ts`: new `estimateCostMultiModel(usageByModel, env)` + `MultiModelCostEstimate` interface. Sums priced costs across models; `knownModel` stays true only when every model used has a vendor-table or env-priced match.
+- `src/agent.ts`: replaces the single `llmTotals` accumulator with `llmTotalsByModel`, builds a per-stage `LLMConfig` map at run start, threads the right config to `planQueries` / `synthesize` / `critique`. The aggregate `usage.llm` summary remains stable for existing library readers.
+- `src/cli.ts`: new `renderMultiModelCostSummary` (called from the main run; `resume` mode still uses single-model `renderCostSummary` against the synth model since it's a one-call path).
+
+### Tests
+
+`+18 across` `test/config.test.mjs` (7 — per-stage defaults, individual flag overrides, env vars, precedence ladder, all-three combo), `test/pricing.test.mjs` (7 — empty input, single-model equivalence, two-known sum, stable ordering, unknown-model fall-through, zero-bucket skip, env override behavior including `knownModel` semantic), `test/parse-args.test.mjs` (4 — each flag captured, all-three plus base coexist). **396/396 default suite green** (378 baseline + 18 new).
+
+### Why a minor bump
+
+New observable surface: three CLI flags, three env vars, a new event field, a new cost-summary shape when multiple models are used. `AgentResult.cost` changed type (additive). Library consumers reading the agent event stream see a new `model` field on `llm.call`. Pre-v0.10.0 runs (no per-stage flags) produce byte-identical CLI output.
+
 ## [0.9.0] - 2026-05-07
 
 Adds **session persistence** — every successful run is saved to disk and can be listed, re-printed, or resumed for cheap iteration — and **streaming during `--deep`** with round-header separators between intermediate drafts. The two features compose: you can watch a deep run stream all four rounds, then `deepdive resume <id> "what about Y instead of X"` to spend one more synthesis call against the same source corpus.

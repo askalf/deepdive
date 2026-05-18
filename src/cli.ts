@@ -56,6 +56,11 @@ Flags:
   --base-url=<url>              LLM endpoint. Default: http://localhost:3456 (dario)
   --api-key=<key>               LLM API key. Default: dario
   --model=<name>                Model to use. Default: claude-sonnet-4-6
+  --plan-model=<name>           Override model for planner stage only (cheap option:
+                                claude-haiku-4-5). Default: same as --model.
+  --synth-model=<name>          Override model for synthesizer stage only. Default: same as --model.
+  --critic-model=<name>         Override model for critic stage only (cheap option:
+                                claude-haiku-4-5). Default: same as --model.
   --max-tokens=<n>              Output max tokens per LLM call. Default: 4096
   --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa
                                 Default: duckduckgo (no key required)
@@ -197,6 +202,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "model":
           flags.model = value;
+          break;
+        case "plan-model":
+          flags.planModel = value;
+          break;
+        case "synth-model":
+          flags.synthModel = value;
+          break;
+        case "critic-model":
+          flags.criticModel = value;
           break;
         case "max-tokens":
           flags.maxTokens = parsePositiveInt(value);
@@ -382,6 +396,35 @@ export function renderCostSummary(
   return head + "\n       (≈ at API list price; $0 on Claude Max via dario)";
 }
 
+/**
+ * Multi-model cost summary. Used when the run spread requests across
+ * models (v0.10.0 per-stage overrides). When only one model was used,
+ * delegates to `renderCostSummary` so the output is identical to
+ * pre-v0.10.0. When two or three models were used, prints the aggregate
+ * line followed by one indented per-model line so the operator can see
+ * where the dollars actually went.
+ */
+export function renderMultiModelCostSummary(
+  cost: import("./pricing.js").MultiModelCostEstimate,
+  baseUrl: string,
+): string {
+  if (cost.byModel.length <= 1) {
+    const single = cost.byModel[0]?.model ?? "(no calls)";
+    return renderCostSummary(cost, single, baseUrl);
+  }
+  // Aggregate line with no model name (multiple); each per-model line
+  // breaks out tokens + dollars.
+  const head = "cost · " + formatCostLine(cost, "multi-model");
+  const breakdown = cost.byModel
+    .map((m) => "       · " + formatCostLine(m.estimate, m.model))
+    .join("\n");
+  const lines = [head, breakdown];
+  if (looksLikeDario(baseUrl)) {
+    lines.push("       (≈ at API list price; $0 on Claude Max via dario)");
+  }
+  return lines.join("\n");
+}
+
 // Renders a small markdown footer when the verification report has any
 // unsupported citations. Returns "" otherwise so clean runs stay clean.
 // Exported for unit tests.
@@ -477,6 +520,7 @@ async function main(argv: string[]): Promise<number> {
       parsed.question,
       {
         llm: config.llm,
+        models: config.models,
         search,
         browser: config.browser,
         resultsPerQuery: config.resultsPerQuery,
@@ -542,9 +586,12 @@ async function main(argv: string[]): Promise<number> {
     // Cost summary lands on stderr regardless of stdout mode (suppressed by
     // --no-cost / DEEPDIVE_NO_COST=1, and skipped for --json since the data
     // is in the JSON envelope already).
+    // v0.10.0: result.cost is a MultiModelCostEstimate (superset of
+    // CostEstimate). Per-stage models → multi-line breakdown; single
+    // model → identical output to pre-v0.10.0.
     const costLine =
       config.costEnabled && !config.jsonOutput
-        ? renderCostSummary(result.cost, config.llm.model, config.llm.baseUrl)
+        ? renderMultiModelCostSummary(result.cost, config.llm.baseUrl)
         : "";
 
     if (streaming && streamed) {
@@ -707,10 +754,13 @@ async function resumeCommand(parsed: ParsedArgs): Promise<number> {
     if (streaming) {
       process.stdout.write(`# ${escapeHeader(newQuestion)}\n\n`);
     }
+    // v0.10.0 — resume re-synthesizes against saved sources, so use the
+    // synth-stage model (no plan / critic stages in resume mode).
+    const synthLLM = { ...config.llm, model: config.models.synth };
     const answer = await synthesize(
       newQuestion,
       record.sources,
-      config.llm,
+      synthLLM,
       ac.signal,
       streaming
         ? (chunk) => {
@@ -742,9 +792,9 @@ async function resumeCommand(parsed: ParsedArgs): Promise<number> {
     }
 
     if (config.costEnabled && !config.jsonOutput) {
-      const cost = estimateCost(usage, config.llm.model, process.env);
+      const cost = estimateCost(usage, synthLLM.model, process.env);
       process.stderr.write(
-        renderCostSummary(cost, config.llm.model, config.llm.baseUrl) + "\n",
+        renderCostSummary(cost, synthLLM.model, config.llm.baseUrl) + "\n",
       );
     }
     process.stderr.write(`session  resumed from ${id}\n`);

@@ -176,6 +176,21 @@ Token counts come straight from the Anthropic API responses. The dollar amount i
 
 The "$0 on Claude Max via dario" hint only appears when `--base-url` matches dario's default port (`http://localhost:3456`) — pointing at a different endpoint suppresses it automatically. Self-hosted or unfamiliar models can plug in their own pricing via `DEEPDIVE_PRICE_INPUT_PER_MTOK` and `DEEPDIVE_PRICE_OUTPUT_PER_MTOK` (per million tokens). Suppress the line entirely with `--no-cost` or `DEEPDIVE_NO_COST=1`. The same numbers also appear in `--json` output as `cost` and `usage.{llm,estimatedCostUsd}` for piping into your own dashboards.
 
+**Per-stage model overrides** *(v0.10.0)*. The pipeline has three LLM stages: **plan** (decomposes the question into sub-queries), **synth** (writes the cited answer), and **critic** (only in `--deep` mode — reviews drafts and proposes follow-up queries). They have very different cost / quality trade-offs: planning is structurally simple; critique is structurally simple; synthesis is where quality matters. Override each independently:
+
+```bash
+deepdive "what changed in the python 3.13 GIL?" --deep \
+  --model=claude-sonnet-4-6 \
+  --plan-model=claude-haiku-4-5 \
+  --critic-model=claude-haiku-4-5
+# → cost · ~$0.034 · 12.1k in / 4.2k out · 7 LLM calls · multi-model
+#        · ~$0.003 · 800 in / 200 out · 1 LLM call · claude-haiku-4-5
+#        · ~$0.030 · 10.7k in / 3.85k out · 3 LLM calls · claude-sonnet-4-6
+#        · ~$0.001 · 600 in / 150 out · 3 LLM calls · claude-haiku-4-5
+```
+
+Env vars too: `DEEPDIVE_PLAN_MODEL`, `DEEPDIVE_SYNTH_MODEL`, `DEEPDIVE_CRITIC_MODEL`. Any stage left unset falls back to `--model` / `DEEPDIVE_MODEL`. Cost telemetry breaks down per model when more than one was used; identical to v0.9 output when only one model was used.
+
 ---
 
 ## OpenAI-compatible endpoints

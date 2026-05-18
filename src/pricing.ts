@@ -98,6 +98,59 @@ export function estimateCost(
   };
 }
 
+/**
+ * Multi-model cost estimate (v0.10.0).
+ *
+ * Sums `estimateCost` across a per-model usage map — used when the run
+ * spread requests across models (per-stage model overrides). The aggregate
+ * `amountUsd` is the sum of priced costs. `knownModel` is true only when
+ * **every** model with non-zero usage is priced (known table entry or
+ * env-var override). Unknown models contribute $0 (same as the single-
+ * model case) and flip `knownModel` to false; the CLI renders `$?` in
+ * that situation rather than understating the bill.
+ *
+ * `byModel` retains the per-model breakdown so the CLI can render a
+ * multi-line cost summary when more than one model was used.
+ */
+export interface MultiModelCostEstimate extends CostEstimate {
+  byModel: Array<{ model: string; estimate: CostEstimate }>;
+}
+
+export function estimateCostMultiModel(
+  usageByModel: Record<string, TokenUsage & { calls: number }>,
+  env?: Record<string, string | undefined>,
+): MultiModelCostEstimate {
+  const byModel: Array<{ model: string; estimate: CostEstimate }> = [];
+  let totalAmount = 0;
+  let totalIn = 0;
+  let totalOut = 0;
+  let totalCalls = 0;
+  let allKnown = true;
+
+  // Stable ordering by model name keeps the rendered cost summary
+  // deterministic across runs.
+  for (const model of Object.keys(usageByModel).sort()) {
+    const usage = usageByModel[model];
+    if (!usage || (usage.inputTokens === 0 && usage.outputTokens === 0 && usage.calls === 0)) continue;
+    const est = estimateCost(usage, model, env);
+    byModel.push({ model, estimate: est });
+    totalAmount += est.amountUsd;
+    totalIn += est.inputTokens;
+    totalOut += est.outputTokens;
+    totalCalls += est.calls;
+    if (!est.knownModel) allKnown = false;
+  }
+
+  return {
+    amountUsd: totalAmount,
+    knownModel: allKnown && byModel.length > 0,
+    inputTokens: totalIn,
+    outputTokens: totalOut,
+    calls: totalCalls,
+    byModel,
+  };
+}
+
 // Renders the one-line cost summary for the CLI. Two flavors:
 //   ~$0.034 · 12.1k in / 4.2k out · 4 LLM calls · claude-sonnet-4-6
 //   $? · 12.1k in / 4.2k out · 4 LLM calls · my-self-hosted
