@@ -350,15 +350,18 @@ Every successful run is saved to `~/.deepdive/sessions/<id>.json` — the full p
 session  2026-05-07_134509_5959f102  (deepdive resume 2026-05-07_134509_5959f102)
 ```
 
-Three subcommands operate on saved sessions:
+Four subcommands operate on saved sessions:
 
 ```bash
-deepdive sessions ls                         # newest first; id, age, source/round counts, question
-deepdive show <id>                           # re-print the original markdown answer
-deepdive resume <id> [<new-question>]        # re-synthesize against the saved sources
+deepdive sessions ls                          # newest first; id, age, source/round counts, question
+deepdive show <id>                            # re-print the original markdown answer
+deepdive resume <id> [<new-question>]         # re-synthesize against the saved sources (cheap)
+deepdive continue <id> [<refined-question>]   # full run seeded with saved sources (adds new pages)
 ```
 
-`resume` is the headline: it re-runs the synthesizer (one LLM call) against the existing source corpus, optionally with a new question or refinement. No re-search, no re-fetch, no critic loop. This closes the iteration loop that the page cache opens — the cache stops re-fetching pages, but `resume` stops re-running the entire pipeline. Refining "what does X say about Y" into "what does X say about Y in the post-2024 era" costs one synthesis instead of an entire deep run.
+`resume` is the cheap iteration path: it re-runs the synthesizer (one LLM call) against the existing source corpus, optionally with a new question or refinement. No re-search, no re-fetch, no critic loop. This closes the iteration loop that the page cache opens — the cache stops re-fetching pages, but `resume` stops re-running the entire pipeline. Refining "what does X say about Y" into "what does X say about Y in the post-2024 era" costs one synthesis instead of an entire deep run.
+
+`continue` (v0.12.0) is the deepening path: it runs the *full* agent loop — plan, search, fetch — with the parent session's sources seeded into the pool. URLs already in the parent are deduped against the new search results so you never re-fetch what you already paid for. The new run is saved as a fresh session with `parentId` set to the parent. Use this when the original got close and you want the planner to expand the corpus with a tighter question.
 
 IDs are timestamp-prefixed (`YYYY-MM-DD_HHMMSS_<8-hex>`), so they sort chronologically and you can pass a unique prefix instead of typing the full id (`deepdive resume 2026-05-07_134509`).
 

@@ -212,6 +212,37 @@ test("renderSessionsList: empty list shows the bootstrap hint", () => {
   assert.match(out, /no sessions yet/);
 });
 
+// ── parentId (v0.12.0) ──────────────────────────────────────────────────────
+
+test("saveSession + loadSession: parentId round-trips when present", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "deepdive-sessions-"));
+  try {
+    const rec = makeRecord("2026-05-07_120007_cccccccc");
+    rec.parentId = "2026-05-07_115959_dddddddd";
+    await saveSession(rec, { dir });
+    const back = await loadSession(rec.id, { dir });
+    assert.equal(back.parentId, rec.parentId);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadSession: pre-v0.12.0 records (no parentId) load with parentId undefined", async () => {
+  // A pre-v0.12.0 session has no parentId field on disk. Must still load
+  // cleanly — additive field, no migration.
+  const dir = mkdtempSync(join(tmpdir(), "deepdive-sessions-"));
+  try {
+    const rec = makeRecord("2026-05-07_120008_eeeeeeee");
+    // makeRecord() doesn't set parentId; saveSession will write a JSON
+    // without that key. loadSession should treat it as undefined.
+    await saveSession(rec, { dir });
+    const back = await loadSession(rec.id, { dir });
+    assert.equal(back.parentId, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("renderSessionsList: includes id, ago, source count, rounds, and truncated question", () => {
   const out = renderSessionsList([
     {

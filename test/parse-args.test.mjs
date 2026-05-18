@@ -211,6 +211,19 @@ test("parseArgs: 'resume <id> <question>' captures both in extras", () => {
   assert.deepEqual(p.extras, ["abc", "what about Y"]);
 });
 
+// v0.12.0 — `continue` subcommand verb
+test("parseArgs: 'continue <id>' captures the id in extras", () => {
+  const p = parseArgs(["continue", "2026-05-07_120000_aabbccdd"]);
+  assert.equal(p.question, "continue");
+  assert.deepEqual(p.extras, ["2026-05-07_120000_aabbccdd"]);
+});
+
+test("parseArgs: 'continue <id> <refined-question>' captures both in extras", () => {
+  const p = parseArgs(["continue", "abc", "follow-up question"]);
+  assert.equal(p.question, "continue");
+  assert.deepEqual(p.extras, ["abc", "follow-up question"]);
+});
+
 test("parseArgs: 'doctor' takes no extras (still rejects unexpected positional now-allowed)", () => {
   // doctor accepts extras (for forward-compat) but typically has none.
   // The point: extras is empty in the simple call.

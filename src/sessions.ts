@@ -33,6 +33,11 @@ export interface SessionRecord {
   verification?: VerificationReport;
   cost: CostEstimate;
   llm: { baseUrl: string; model: string };
+  // v0.12.0 — backlink to the session this one was `continue`-d from.
+  // Additive optional field; pre-v0.12.0 records load with `parentId`
+  // undefined. Lets `sessions ls` (in a future release) render the
+  // parent chain and `show` link back.
+  parentId?: string;
 }
 
 export interface SessionMeta {
