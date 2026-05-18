@@ -819,12 +819,9 @@ test("agent: preKept dedupes against fresh search results (no re-fetch of saved 
     // Saved URL must keep its ORIGINAL content (not a re-fetch).
     const saved = result.sources.find((s) => s.url === "https://ex.com/saved");
     assert.equal(saved.content, "originalSavedContent");
-    // And the browser must not have touched the saved URL.
-    assert.equal(
-      tracker.fetched.includes("https://ex.com/saved"),
-      false,
-      "saved URL is not re-fetched",
-    );
+    // And the browser must not have touched the saved URL — the exact
+    // fetched-URL list proves both that saved was skipped and that the
+    // new URL was the only thing fetched.
     assert.deepEqual(tracker.fetched, ["https://ex.com/new"]);
   } finally {
     await stopServer(server);
