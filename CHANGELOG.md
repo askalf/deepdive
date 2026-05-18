@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-18
+
+Adds **`--max-cost`** — a hard budget cap on what a single run can spend. After each LLM call completes, the agent re-aggregates the cost across every model used (v0.10.0 multi-model layer) and throws `BudgetExceededError` if the running total crosses the cap. The CLI maps the error to a distinct exit code (2, vs 1 for real errors) so wrapping scripts can branch on it.
+
+### Added — `--max-cost=<$X.YY>` / `DEEPDIVE_MAX_COST`
+
+```bash
+# Cap at 50 cents. Aborts before the next call if the running total exceeds.
+deepdive "what changed in the python 3.13 GIL?" --deep --max-cost=$0.50
+
+# Bare numeric form works too.
+deepdive "..." --max-cost=0.25
+
+# Hit the cap mid-run:
+$ echo $?
+2
+$ deepdive: budget cap exceeded: spent $0.534 of $0.500
+```
+
+Semantics — the check fires **after** each call, not before. So the cap is a guarantee about "we will not start a NEXT call that would push past X", not "we will not exceed X by a single token." A long synth call can slightly over-spend; we accept that single overrun rather than try to predict per-token cost mid-stream (which isn't possible without per-streamed-token usage callbacks that aren't universally available on the wire formats deepdive supports). Same approach as dario's overage-guard: detect on the response, halt before the next request.
+
+**Unknown models — partial enforcement.** When any model in the run isn't priced (no `PRICE_TABLE` entry AND no `DEEPDIVE_PRICE_*_PER_MTOK` env override), the cost estimator returns $0 for that model. The cap *still* enforces against the priced subset, but the abort message includes a one-line warning: `"N call(s) on unpriced models contributed $0 to the running total — cap enforcement is incomplete"`. Honest signal: you know the cap was enforced against what we could price.
+
+### Internal
+
+- New `src/budget.ts` (~70 lines): `parseMaxCost`, `formatMaxCost`, `enforceBudget`, `BudgetExceededError`. Pure; no I/O.
+- `src/agent.ts`: the per-call usage sink now (a) tracks running unpriced-call count via `priceFor` lookup, (b) recomputes `estimateCostMultiModel` after each call when a cap is set, (c) calls `enforceBudget` which throws on exceed.
+- `src/cli.ts`: parses `--max-cost=` via `parseMaxCost`; threads `maxCostUsd` to `runAgent`; catches `BudgetExceededError` distinctly and exits 2.
+- `src/config.ts`: `RuntimeConfig` and `CLIFlags` gain `maxCostUsd?: number`; resolves env `DEEPDIVE_MAX_COST` via `parseMaxCost`.
+- `AgentConfig` gains `maxCostUsd?: number` for direct library use.
+
+### Tests
+
++21 new across:
+- `test/budget.test.mjs` (14): `parseMaxCost` (bare number, leading `$`, whitespace, empty/null, zero/negative rejection, junk rejection, scientific-notation rejection), `formatMaxCost`, `enforceBudget` (undefined cap = no-op, under cap, boundary equality, exceed throws with right fields, unpriced-call message), `BudgetExceededError` class shape, integration-shape multi-model estimate.
+- `test/parse-args.test.mjs` (4): `--max-cost=$0.50` parses to 0.5, `--max-cost=5` to 5, malformed throws with helpful message, negatives rejected.
+- `test/agent-loop.test.mjs` (2): a real agent run with `maxCostUsd: 0.5` aborts as `BudgetExceededError` with `spentUsd > capUsd`; the same scenario with `maxCostUsd: undefined` completes successfully.
+
+**417/417 default suite green** (396 baseline + 21 new).
+
+### Why a minor bump
+
+New CLI surface (`--max-cost`), new env var (`DEEPDIVE_MAX_COST`), new exported error class (`BudgetExceededError`) on the library surface, new `maxCostUsd?` field on `AgentConfig`. New exit code 2 for "cap hit" — distinguishable from exit 1 ("error"). Purely additive — runs without `--max-cost` are byte-identical to v0.10.0.
+
 ## [0.10.0] - 2026-05-18
 
 Adds **per-stage model overrides** — plan, synthesize, and critic can each run on a different model, paid against the right price tier. The pipeline already tagged every LLM call with `phase: "plan" | "synth" | "critique"` (since v0.6.0's cost telemetry); v0.10.0 lets you actually act on that tag.

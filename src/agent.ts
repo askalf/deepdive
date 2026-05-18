@@ -23,8 +23,10 @@ import {
 } from "./verify.js";
 import {
   estimateCostMultiModel,
+  priceFor,
   type MultiModelCostEstimate,
 } from "./pricing.js";
+import { enforceBudget, BudgetExceededError } from "./budget.js";
 import {
   extractPdfText,
   PdfExtractorMissingError,
@@ -54,6 +56,11 @@ export interface AgentConfig {
   // when undefined. Library consumers who want a single model can omit
   // this object entirely; the agent treats undefined-stage as "use base".
   models?: { plan?: string; synth?: string; critique?: string };
+  // v0.11.0 — budget cap in USD. After each LLM call, the agent
+  // computes the running aggregate cost; if it exceeds `maxCostUsd`,
+  // a `BudgetExceededError` is thrown (caught by the CLI; library
+  // consumers can catch it directly). Undefined means no cap.
+  maxCostUsd?: number;
   search: SearchAdapter;
   browser: BrowserOptions;
   resultsPerQuery: number;
@@ -204,6 +211,11 @@ export async function runAgent(
     }
     return bucket;
   };
+  // v0.11.0 — running tally of calls whose model contributed $0 to the
+  // aggregate (no PRICE_TABLE entry AND no env override). Surfaced in
+  // the BudgetExceededError so the user knows the cap was enforced
+  // against the priced subset only.
+  let unpricedCallCount = 0;
 
   const usageSinkFor =
     (phase: "plan" | "synth" | "critique", round: number) =>
@@ -213,6 +225,7 @@ export async function runAgent(
       bucket.inputTokens += u.input_tokens ?? 0;
       bucket.outputTokens += u.output_tokens ?? 0;
       bucket.calls += 1;
+      if (!priceFor(model, config.env)) unpricedCallCount += 1;
       emit(config, {
         type: "llm.call",
         phase,
@@ -221,6 +234,14 @@ export async function runAgent(
         outputTokens: u.output_tokens ?? 0,
         model,
       });
+      // v0.11.0 — budget check fires AFTER the event emits, so the
+      // call that triggered the abort is still visible in the event
+      // stream. Throws BudgetExceededError; the agent's outer try/catch
+      // (or library consumer's) handles it.
+      if (config.maxCostUsd !== undefined) {
+        const running = estimateCostMultiModel(llmTotalsByModel, config.env);
+        enforceBudget(running, config.maxCostUsd, unpricedCallCount);
+      }
     };
 
   emit(config, { type: "plan.start", question });

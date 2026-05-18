@@ -825,3 +825,84 @@ test("agent: survives a failed fetch (mock 500) without crashing", async () => {
     await stopServer(server);
   }
 });
+
+// v0.11.0 — budget cap aborts a run mid-pipeline
+test("agent: maxCostUsd aborts after the call that crosses the cap", async () => {
+  const planJson =
+    '{"reasoning":"two queries","queries":["q1","q2"]}';
+  const synthText = "Final answer with [1][2].";
+  // Use enough tokens that the plan + synth call BOTH bring the cost
+  // above $0.001. With claude-sonnet-4-6 priced at $3/MTok input and
+  // $15/MTok output, 100k in + 50k out = $0.30 + $0.75 = $1.05.
+  // So setting maxCostUsd=0.5 means plan call (alone) is ~$1.05 → trips.
+  const { server } = makeLLMServer(
+    [planJson, synthText],
+    [{ input_tokens: 100_000, output_tokens: 50_000 }, { input_tokens: 100, output_tokens: 100 }],
+  );
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({ q1: [], q2: [] });
+  const pages = {};
+
+  try {
+    let err;
+    try {
+      await runAgent("question", {
+        llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+        maxCostUsd: 0.5,
+        search,
+        browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+        resultsPerQuery: 5,
+        maxSources: 12,
+        maxWordsPerSource: 2000,
+        deepRounds: 0,
+        concurrency: 2,
+        browserFactory: mockBrowserFactory(pages),
+      });
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err, "agent should throw when cap is exceeded");
+    assert.equal(err?.name, "BudgetExceededError");
+    assert.ok(err.spentUsd > 0.5, `spentUsd should exceed cap (got ${err.spentUsd})`);
+    assert.equal(err.capUsd, 0.5);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: undefined maxCostUsd means no cap, run completes", async () => {
+  // Same setup as above but no cap — should finish.
+  const planJson =
+    '{"reasoning":"one","queries":["q1"]}';
+  const synthText = "answer [1]";
+  const { server } = makeLLMServer(
+    [planJson, synthText],
+    [{ input_tokens: 100_000, output_tokens: 50_000 }, { input_tokens: 100, output_tokens: 100 }],
+  );
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [{ url: "https://ex.com/a", title: "A", snippet: "..." }],
+  });
+  const pages = { "https://ex.com/a": { text: LOREM, title: "A" } };
+
+  try {
+    const result = await runAgent("question", {
+      llm: { baseUrl, apiKey: "t", model: "claude-sonnet-4-6", maxTokens: 512 },
+      // maxCostUsd: undefined  — no cap
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.ok(result.cost.amountUsd > 0.5, "would have hit a cap if one was set");
+    assert.match(result.markdown, /answer/);
+  } finally {
+    await stopServer(server);
+  }
+});

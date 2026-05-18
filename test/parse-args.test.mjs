@@ -258,3 +258,28 @@ test("parseArgs: all three per-stage model flags can coexist with --model", () =
   assert.equal(p.flags.synthModel, "claude-opus-4-7");
   assert.equal(p.flags.criticModel, "claude-haiku-4-5");
 });
+
+// v0.11.0 — budget cap flag
+test("parseArgs: --max-cost=$0.50 parses to 0.5", () => {
+  const p = parseArgs(["--max-cost=$0.50", "q"]);
+  assert.equal(p.flags.maxCostUsd, 0.5);
+});
+
+test("parseArgs: --max-cost=5 (bare) parses to 5", () => {
+  const p = parseArgs(["--max-cost=5", "q"]);
+  assert.equal(p.flags.maxCostUsd, 5);
+});
+
+test("parseArgs: --max-cost=abc throws", () => {
+  assert.throws(
+    () => parseArgs(["--max-cost=abc", "q"]),
+    /--max-cost must be a positive dollar amount/,
+  );
+});
+
+test("parseArgs: --max-cost=-1 throws (negatives rejected)", () => {
+  assert.throws(
+    () => parseArgs(["--max-cost=-1", "q"]),
+    /--max-cost must be a positive dollar amount/,
+  );
+});
