@@ -191,6 +191,18 @@ deepdive "what changed in the python 3.13 GIL?" --deep \
 
 Env vars too: `DEEPDIVE_PLAN_MODEL`, `DEEPDIVE_SYNTH_MODEL`, `DEEPDIVE_CRITIC_MODEL`. Any stage left unset falls back to `--model` / `DEEPDIVE_MODEL`. Cost telemetry breaks down per model when more than one was used; identical to v0.9 output when only one model was used.
 
+**Hard budget cap** *(v0.11.0)*. `--max-cost=$X.YY` (or `DEEPDIVE_MAX_COST`) sets a dollar ceiling. After every LLM call, the agent re-aggregates spend across all models and aborts before the next call if the running total has crossed the cap. The CLI exits with code **2** on cap-hit (distinct from code 1 for real errors), so wrapping scripts can branch on it.
+
+```bash
+deepdive "..." --deep --max-cost=$0.50
+# ...
+# deepdive: budget cap exceeded: spent $0.534 of $0.500
+# $ echo $?
+# 2
+```
+
+The check fires *after* each call completes, so a long synth call may slightly over-spend before aborting — predicting per-token cost mid-stream isn't possible on every wire format deepdive supports. When the run uses any unpriced model (no entry in the built-in table and no `DEEPDIVE_PRICE_*_PER_MTOK` override), the abort message warns that enforcement was against the priced subset only.
+
 ---
 
 ## OpenAI-compatible endpoints

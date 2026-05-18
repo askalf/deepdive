@@ -13,6 +13,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveConfig, type CLIFlags } from "./config.js";
+import { parseMaxCost, BudgetExceededError } from "./budget.js";
 import { resolveSearchAdapter } from "./search.js";
 import { runAgent, type AgentEvent } from "./agent.js";
 import { createCache } from "./cache.js";
@@ -61,6 +62,9 @@ Flags:
   --synth-model=<name>          Override model for synthesizer stage only. Default: same as --model.
   --critic-model=<name>         Override model for critic stage only (cheap option:
                                 claude-haiku-4-5). Default: same as --model.
+  --max-cost=<$X.YY>            Abort the run before the next LLM call would exceed this
+                                dollar cap. e.g. --max-cost=$0.50 or --max-cost=5.
+                                Env: DEEPDIVE_MAX_COST. Exit code 2 on cap-hit.
   --max-tokens=<n>              Output max tokens per LLM call. Default: 4096
   --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa
                                 Default: duckduckgo (no key required)
@@ -211,6 +215,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "critic-model":
           flags.criticModel = value;
+          break;
+        case "max-cost":
+          {
+            const parsed = parseMaxCost(value);
+            if (parsed === undefined) {
+              throw new Error(
+                `--max-cost must be a positive dollar amount (e.g. --max-cost=\$0.50 or --max-cost=5); got: ${value}`,
+              );
+            }
+            flags.maxCostUsd = parsed;
+          }
           break;
         case "max-tokens":
           flags.maxTokens = parsePositiveInt(value);
@@ -521,6 +536,7 @@ async function main(argv: string[]): Promise<number> {
       {
         llm: config.llm,
         models: config.models,
+        maxCostUsd: config.maxCostUsd,
         search,
         browser: config.browser,
         resultsPerQuery: config.resultsPerQuery,
@@ -646,6 +662,13 @@ async function main(argv: string[]): Promise<number> {
     if (sessionId) writeSessionHint(sessionId);
     return strictFail ? 1 : 0;
   } catch (err) {
+    // v0.11.0 — distinct exit code for "we deliberately stopped because
+    // the budget cap was hit". Wrapping scripts can branch on `=== 2`
+    // (cap) vs `=== 1` (real error).
+    if (err instanceof BudgetExceededError) {
+      process.stderr.write(`deepdive: ${err.message}\n`);
+      return 2;
+    }
     process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
     return 1;
   } finally {

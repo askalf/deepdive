@@ -8,6 +8,7 @@ import type { BrowserOptions } from "./browser.js";
 import { parseDomainList, type DomainFilter } from "./domain-filter.js";
 import { detectApiFormat, type ApiFormat } from "./llm-format.js";
 import { defaultSessionsDir } from "./sessions.js";
+import { parseMaxCost } from "./budget.js";
 
 export interface RuntimeConfig {
   llm: LLMConfig;
@@ -36,6 +37,8 @@ export interface RuntimeConfig {
   jsonOutput: boolean;
   streamEnabled: boolean;
   verbose: boolean;
+  // v0.11.0 — budget cap in USD. Undefined = no cap.
+  maxCostUsd?: number;
 }
 
 export interface CLIFlags {
@@ -73,6 +76,11 @@ export interface CLIFlags {
   json?: boolean;
   noStream?: boolean;
   verbose?: boolean;
+  // v0.11.0 — already-parsed budget cap in USD. CLI parser converts
+  // "--max-cost=$0.50" / "$5" / "0.25" into a number; resolveConfig
+  // accepts the parsed value (parseMaxCost lives in budget.ts and the
+  // CLI uses it before invoking resolveConfig).
+  maxCostUsd?: number;
 }
 
 const DEFAULTS = {
@@ -226,6 +234,10 @@ export function resolveConfig(
   const streamEnabled = !streamOptOut && !jsonOutput;
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
 
+  // v0.11.0 — budget cap. Flag takes a pre-parsed number from cli.ts
+  // (which uses parseMaxCost on the raw string). Env var is parsed here.
+  const maxCostUsd = flags.maxCostUsd ?? parseMaxCost(env.DEEPDIVE_MAX_COST);
+
   return {
     llm: {
       baseUrl,
@@ -265,6 +277,7 @@ export function resolveConfig(
     jsonOutput,
     streamEnabled,
     verbose,
+    maxCostUsd,
   };
 }
 
