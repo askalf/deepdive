@@ -11,7 +11,7 @@ export class AutoSearch implements SearchAdapter {
 
   constructor(
     private readonly primary: SearchAdapter,
-    private readonly fallback: SearchAdapter,
+    private readonly fallback: SearchAdapter | null,
   ) {
     this.lastEngine = primary.name;
   }
@@ -21,6 +21,7 @@ export class AutoSearch implements SearchAdapter {
     limit: number,
     signal?: AbortSignal,
   ): Promise<SearchResult[]> {
+    let primaryError: unknown;
     let primaryFailed = false;
     try {
       const results = await this.primary.search(query, limit, signal);
@@ -31,11 +32,17 @@ export class AutoSearch implements SearchAdapter {
       primaryFailed = true;
     } catch (err) {
       if (signal?.aborted) throw err;
+      primaryError = err;
       primaryFailed = true;
     }
     if (!primaryFailed) {
       this.lastEngine = this.primary.name;
       return [];
+    }
+    if (this.fallback === null) {
+      this.lastEngine = this.primary.name;
+      if (primaryError !== undefined) throw primaryError;
+      throw new Error(`primary search '${this.primary.name}' returned 0 results and no fallback is configured`);
     }
     const results = await this.fallback.search(query, limit, signal);
     this.lastEngine = this.fallback.name;
