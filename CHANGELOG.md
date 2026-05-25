@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — `--search=auto` fallback mode
+
+New search adapter `auto` runs DuckDuckGo first and transparently falls back to Brave Search when DDG throws (rate-limit / 5xx / network error) or returns zero results.
+
+```bash
+# DDG primary, Brave fallback (only if DEEPDIVE_BRAVE_KEY is set).
+export DEEPDIVE_BRAVE_KEY=<your-brave-key>
+deepdive "test query" --search=auto
+
+# Equivalent via env.
+DEEPDIVE_SEARCH=auto deepdive "test query"
+```
+
+If `DEEPDIVE_BRAVE_KEY` is unset, `auto` degrades to DDG-only (does not error) — same effective behavior as the prior default. With the key set, transient DDG failures are masked by the Brave retry.
+
+Brave Search itself has been wired as a first-class `--search=brave` adapter since before this release (`src/search/brave.ts`); this change adds the orchestration layer.
+
+### Internal
+
+- `src/search/auto.ts` (new): `AutoSearch` wraps a primary + optional secondary `SearchAdapter`. On primary error OR empty result it retries the secondary, unless the abort signal is already tripped (in which case it rethrows the primary error to preserve cancellation semantics).
+- `src/search.ts`: new `auto` case in `resolveSearchAdapter`. Brave secondary is constructed only when `DEEPDIVE_BRAVE_KEY` is present, so `auto` works in unconfigured environments (DDG-only degrade) without an env-var error.
+- `src/cli.ts`: `--search` help text lists `auto` and documents the DDG→Brave fallback contract.
+
+### Tests
+
+- `test/search-auto.test.mjs` (new, 9 cases): primary success, primary error → fallback, primary empty → fallback, primary error with no secondary rethrows, primary empty with no secondary throws zero-results, signal/limit pass-through, aborted signal skips fallback, and the two `resolveSearchAdapter("auto", env)` paths (with and without `DEEPDIVE_BRAVE_KEY`).
+
 ## [0.12.0] - 2026-05-18
 
 Adds **`deepdive continue <id> [<refined-question>]`** — a new subcommand that runs a *full* agent loop seeded with a saved session's sources. Unlike `resume` (which just re-synthesizes against the saved corpus — cheap, no fetches), `continue` plans + searches + fetches new pages with the parent's sources kept in the pool. Saved as a new session linked to the parent via a new `parentId` field on the record.

@@ -69,8 +69,11 @@ Flags:
                                 dollar cap. e.g. --max-cost=$0.50 or --max-cost=5.
                                 Env: DEEPDIVE_MAX_COST. Exit code 2 on cap-hit.
   --max-tokens=<n>              Output max tokens per LLM call. Default: 4096
-  --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa
-                                Default: duckduckgo (no key required)
+  --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa | auto
+                                Default: duckduckgo (no key required). 'auto' runs
+                                DDG first and falls back to Brave (if
+                                DEEPDIVE_BRAVE_KEY is set) when DDG fails or
+                                returns no results.
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
