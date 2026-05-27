@@ -97,6 +97,52 @@ Citations are numbered and inline. The source table at the end records the exact
 
 ---
 
+## Cookbook
+
+Five concrete shapes the tool gets used for. Copy, swap the query, run.
+
+### Latest benchmark results
+
+```sh
+deepdive "what are the latest results on the SWE-bench leaderboard" --out=swebench.md
+```
+
+Single-pass run, roughly $0.05–$0.15 in tokens. Surfaces the current top systems with cited result rows and submission dates — no critic loop, since "what's on the leaderboard" is a factual lookup, not a thing that needs arguing about.
+
+### How does X work, technically
+
+```sh
+deepdive "how does claude's prompt caching actually work" --deep --verbose --out=caching.md
+```
+
+Critic loop iterates until the report covers TTL semantics, billing impact, and known gotchas. `--verbose` prints each round's critic verdict so you can see what's missing. Typical cost $0.50–$2 depending on how many rounds it takes to satisfy the critic.
+
+### Best practices for $stack at small scale
+
+```sh
+deepdive "best practices for running postgres for a single-node side project in 2026" --deep=3 --search=brave --out=pg.md
+```
+
+Three-round critic-bounded report. `--search=brave` swaps the default DDG adapter for Brave, which tends to return fresher results on fast-moving ecosystem questions. Useful when the default search keeps surfacing pre-2024 blog posts.
+
+### Compare A vs B with current data
+
+```sh
+deepdive "perplexity vs you-com vs gemini deep research — current limits, pricing, and use cases" --deep --strict-cites --out=compare.md
+```
+
+`--strict-cites` exits non-zero if any claim fails lexical recall verification against its cited source. Good for scripted comparison reports where you'd rather get a hard failure than a confidently-cited hallucination about somebody's pricing tier.
+
+### Mix project notes with web research
+
+```sh
+deepdive "is our retroactive-billing policy compatible with EU consumer law" --include=~/notes/billing,./POLICY.md --deep --out=billing.md
+```
+
+`--include` blends local files into the source pool; they get the lowest citation IDs and the most prominent position in the prompt. The output cites both `file://` paths and URLs, so an internal doc and a regulator's site can sit side by side in the same source table.
+
+---
+
 ## The `--deep` loop
 
 Single-pass mode (no `--deep` flag) is what other local "research CLI" tools do: plan → search → fetch → synthesize → done. Good enough for simple factual lookups. Not great for "explain how X actually works."
