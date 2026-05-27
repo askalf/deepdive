@@ -335,6 +335,7 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 | Brave Search | `--search=brave` | `DEEPDIVE_BRAVE_KEY` | Paid, high quality. |
 | Tavily | `--search=tavily` | `DEEPDIVE_TAVILY_KEY` | Research-tuned. Returns pre-extracted content; deepdive re-fetches anyway for consistency. |
 | Exa | `--search=exa` | `DEEPDIVE_EXA_KEY` | Neural search tuned for long, intent-rich queries — a fit for the kind of sub-queries the planner and critic loop generate. Highlights only; deepdive re-fetches the page for full content. |
+| Auto | `--search=auto` | `DEEPDIVE_BRAVE_KEY` (optional) | DDG primary, Brave fallback on DDG failure or empty results. Degrades to DDG-only when no Brave key is set. |
 
 Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts`, register in `src/search.ts`.
 

@@ -49,6 +49,22 @@ export async function resolveSearchAdapter(
       if (!key) throw new Error("exa adapter requires DEEPDIVE_EXA_KEY");
       return new ExaSearch(key);
     }
+    case "auto": {
+      // DDG primary, Brave fallback. Brave is optional — if no key is set,
+      // `auto` degrades to DDG-only (the pre-auto default behavior) rather
+      // than failing, so users without a Brave key still get sensible
+      // results.
+      const { AutoSearch } = await import("./search/auto.js");
+      const { DuckDuckGoSearch } = await import("./search/duckduckgo.js");
+      const primary = new DuckDuckGoSearch();
+      const braveKey = env.DEEPDIVE_BRAVE_KEY;
+      let secondary = null;
+      if (braveKey) {
+        const { BraveSearch } = await import("./search/brave.js");
+        secondary = new BraveSearch(braveKey);
+      }
+      return new AutoSearch(primary, secondary);
+    }
     default:
       throw new Error(`unknown search adapter: ${name}`);
   }
