@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-28
+
 ### Added — `--search=auto` fallback mode
 
 New search adapter `auto` runs DuckDuckGo first and transparently falls back to Brave Search when DDG throws (rate-limit / 5xx / network error) or returns zero results.
