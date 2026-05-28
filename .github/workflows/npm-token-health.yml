@@ -56,22 +56,18 @@ jobs:
           # Rot is declared only if BOTH fail. Both are authenticated
           # registry calls (neither passes on an invalid token), so real
           # rot is still caught while the granular false-positive is not.
-          set +e
           ok=1
-          whoami_out=$(npm whoami --registry=https://registry.npmjs.org 2>&1)
-          if [ $? -eq 0 ]; then
+          # Assign inside the `if` so we branch on the command's exit code
+          # directly (shellcheck SC2181) while still capturing stdout+stderr.
+          if whoami_out=$(npm whoami --registry=https://registry.npmjs.org 2>&1); then
             ok=0
             probe="whoami succeeded: $whoami_out"
+          elif access_out=$(npm access list packages @askalf --registry=https://registry.npmjs.org 2>&1); then
+            ok=0
+            probe="whoami 401 (granular token — expected); 'npm access list packages @askalf' succeeded"
           else
-            access_out=$(npm access list packages @askalf --registry=https://registry.npmjs.org 2>&1)
-            if [ $? -eq 0 ]; then
-              ok=0
-              probe="whoami 401 (granular token — expected); 'npm access list packages @askalf' succeeded"
-            else
-              probe=$(printf 'BOTH probes failed.\n--- npm whoami ---\n%s\n--- npm access list packages @askalf ---\n%s\n' "$whoami_out" "$access_out")
-            fi
+            probe=$(printf 'BOTH probes failed.\n--- npm whoami ---\n%s\n--- npm access list packages @askalf ---\n%s\n' "$whoami_out" "${access_out:-}")
           fi
-          set -e
           echo "exit=$ok" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$probe" > whoami.txt
           if [ "$ok" = "0" ]; then
