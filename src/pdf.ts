@@ -81,7 +81,11 @@ export async function extractPdfText(
           disableWorker?: boolean;
           isEvalSupported?: boolean;
           useSystemFonts?: boolean;
-        }) => { promise: Promise<PdfDocumentLike> };
+          standardFontDataUrl?: string;
+        }) => {
+          promise: Promise<PdfDocumentLike>;
+          destroy: () => Promise<void>;
+        };
         GlobalWorkerOptions?: { workerSrc?: string };
       };
   if (!pdfjs) throw new PdfExtractorMissingError();
@@ -104,19 +108,39 @@ export async function extractPdfText(
     }
   }
 
+  // pdfjs-dist v6 throws "Ensure that the standardFontDataUrl API parameter
+  // is provided" the moment a PDF references a standard font. Resolve the
+  // bundled standard_fonts directory (sibling of the legacy build) and pass
+  // it below so extraction works for those PDFs. Best-effort — on failure
+  // the getDocument call surfaces a clear error.
+  let standardFontDataUrl: string | undefined;
+  try {
+    const { createRequire } = await import("node:module");
+    const path = await import("node:path");
+    const req = createRequire(import.meta.url);
+    const pdfMjs = req.resolve("pdfjs-dist/legacy/build/pdf.mjs");
+    const pkgRoot = path.resolve(path.dirname(pdfMjs), "..", "..");
+    standardFontDataUrl =
+      path.join(pkgRoot, "standard_fonts").replace(/\\/g, "/") + "/";
+  } catch {
+    // ignore — getDocument surfaces a clear error if fonts are then needed
+  }
+
   const maxPages = Math.max(1, opts.maxPages ?? 50);
 
   // pdfjs-dist mutates the buffer it parses; pass a copy so cache
   // round-trips don't corrupt across uses.
   const buf = bytes.slice();
-  const doc = await pdfjs
-    .getDocument({
-      data: buf,
-      disableWorker: true,
-      isEvalSupported: false,
-      useSystemFonts: false,
-    })
-    .promise;
+  // Keep the loading task: pdfjs v6 removed PDFDocumentProxy.destroy(), so
+  // teardown goes through loadingTask.destroy() (stable across versions).
+  const loadingTask = pdfjs.getDocument({
+    data: buf,
+    disableWorker: true,
+    isEvalSupported: false,
+    useSystemFonts: false,
+    standardFontDataUrl,
+  });
+  const doc = await loadingTask.promise;
 
   const pageCount = doc.numPages;
   const parsedPages = Math.min(pageCount, maxPages);
@@ -126,7 +150,7 @@ export async function extractPdfText(
     const content = await page.getTextContent();
     pageTexts.push(joinTextItems(content.items));
   }
-  await doc.destroy().catch(() => undefined);
+  await loadingTask.destroy().catch(() => undefined);
 
   const text = dedupeRunningHeadersFooters(pageTexts).join("\n\n");
   return {
@@ -140,7 +164,6 @@ export async function extractPdfText(
 interface PdfDocumentLike {
   numPages: number;
   getPage: (n: number) => Promise<PdfPageLike>;
-  destroy: () => Promise<void>;
 }
 interface PdfPageLike {
   getTextContent: () => Promise<{ items: PdfTextItem[] }>;
