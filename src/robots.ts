@@ -200,19 +200,44 @@ function pathMatches(pattern: string, path: string): boolean {
   if (!pattern.includes("*") && !pattern.endsWith("$")) {
     return path.startsWith(pattern);
   }
-  // Convert to regex, escaping other regex-special chars.
-  let re = "";
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i];
-    if (c === "*") re += ".*";
-    else if (c === "$" && i === pattern.length - 1) re += "$";
-    else re += c.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+  // Linear two-pointer wildcard match. The pattern comes from an untrusted,
+  // attacker-controlled robots.txt, so we deliberately avoid compiling it to
+  // a regex: expanding many `*` into `.*.*.*…` backtracks polynomially, and a
+  // few dozen `*` will hang the run (a ReDoS). This greedy matcher is
+  // O(path × pattern) worst case with no catastrophic backtracking, and
+  // mirrors the prior `^`-anchored semantics: `*` matches any run, a trailing
+  // `$` anchors the end so the whole path must be consumed.
+  let anchorEnd = false;
+  if (pattern.endsWith("$")) {
+    anchorEnd = true;
+    pattern = pattern.slice(0, -1);
   }
-  try {
-    return new RegExp("^" + re).test(path);
-  } catch {
-    return false;
+  let p = 0;
+  let s = 0;
+  let starP = -1;
+  let starS = 0;
+  while (s < path.length) {
+    if (p < pattern.length && pattern[p] === "*") {
+      starP = p;
+      starS = s;
+      p++;
+    } else if (p < pattern.length && pattern[p] === path[s]) {
+      p++;
+      s++;
+    } else if (starP !== -1) {
+      // Let the most recent `*` consume one more character, then retry.
+      p = starP + 1;
+      s = ++starS;
+    } else {
+      return false;
+    }
+    // Pattern fully matched and no end-anchor → prefix match; trailing path ok.
+    if (p === pattern.length && !anchorEnd) return true;
   }
+  // Path exhausted: any remaining pattern must be only `*` to still match.
+  while (p < pattern.length && pattern[p] === "*") p++;
+  if (p !== pattern.length) return false;
+  return anchorEnd ? s === path.length : true;
 }
 
 function stripComment(s: string): string {
