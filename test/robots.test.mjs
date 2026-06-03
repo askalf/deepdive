@@ -112,6 +112,21 @@ test("parse: malformed lines silently skipped", () => {
   assert.equal(isPathAllowed(p, "/yes", "b"), true);
 });
 
+test("parse: pathological wildcard pattern stays linear (ReDoS regression)", () => {
+  // A site's robots.txt is untrusted. A Disallow with many `*` must not
+  // trigger catastrophic regex backtracking — pre-fix this hung for seconds.
+  const evil = "/" + "*".repeat(50) + "x";
+  const p = parseRobotsTxt(`
+    User-agent: *
+    Disallow: ${evil}
+  `);
+  const t0 = Date.now();
+  // Path that does NOT end in 'x' → worst case for backtracking.
+  const allowed = isPathAllowed(p, "/" + "a".repeat(64), "b");
+  assert.equal(Date.now() - t0 < 1000, true, "robots path matching must stay linear");
+  assert.equal(allowed, true); // pattern doesn't match → not disallowed
+});
+
 // ──────── canFetch: integration ────────────────────────────────────────────
 
 function makeRobotsServer(responder) {
