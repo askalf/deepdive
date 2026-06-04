@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [0.13.1] - 2026-06-04
+## [0.13.2] - 2026-06-04
+
+### Added
+
+- **`--browser-cdp-endpoint=<url>` (env `DEEPDIVE_BROWSER_CDP_ENDPOINT`)** — attach to an existing CDP browser instead of launching a local Chromium. `BrowserSession.start()` calls `connectOverCDP` when set, runs the fetch in an isolated context on the remote browser, and never downloads or launches Chromium — so containerized/fleet installs can share one hardened browser (e.g. a browser bridge) and skip the Playwright browser download. Launch args/stealth are owned by the remote browser; deepdive still sets the per-run context (UA, viewport, locale). `deepdive doctor` reports the CDP connection + remote Chrome version when the endpoint is set. Default (unset) behavior is unchanged.
 
 ### Fixed
 

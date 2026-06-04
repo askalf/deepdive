@@ -81,6 +81,9 @@ export interface CLIFlags {
   // accepts the parsed value (parseMaxCost lives in budget.ts and the
   // CLI uses it before invoking resolveConfig).
   maxCostUsd?: number;
+  // When set, attach to an existing CDP browser (e.g. a shared browser
+  // container) instead of launching a local Chromium. Env: DEEPDIVE_BROWSER_CDP_ENDPOINT.
+  browserCdpEndpoint?: string;
 }
 
 const DEFAULTS = {
@@ -257,6 +260,7 @@ export function resolveConfig(
       headless: env.DEEPDIVE_HEADED === "1" ? false : true,
       timeoutMs,
       maxBytes: DEFAULTS.maxBytesPerFetch,
+      cdpEndpoint: flags.browserCdpEndpoint ?? env.DEEPDIVE_BROWSER_CDP_ENDPOINT,
     },
     searchAdapter,
     resultsPerQuery,
