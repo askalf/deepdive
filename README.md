@@ -209,6 +209,19 @@ This is the kind of thing hosted research tools cannot do — your notes don't l
 
 ---
 
+## Remote browser (CDP)
+
+By default deepdive launches a local headless Chromium via Playwright, which means a first install needs the browser binaries (`npx playwright install`). To skip that and attach to an existing browser instead, point deepdive at a CDP endpoint:
+
+```bash
+deepdive "..." --browser-cdp-endpoint=http://browser-host:9222
+# or: export DEEPDIVE_BROWSER_CDP_ENDPOINT=http://browser-host:9222
+```
+
+deepdive then connects over the Chrome DevTools Protocol, runs each fetch in an isolated context on that browser, and never downloads or launches Chromium itself. The remote browser owns its own flags and stealth profile; deepdive only sets the per-run context (user-agent, viewport, locale). This suits containers and shared browser services where one hardened Chromium serves many callers. Note that pages are fetched from the *remote browser's* network egress, not the caller's. `deepdive doctor` reports the connection (and the remote Chrome version) instead of a local launch when the endpoint is set.
+
+---
+
 ## Cost telemetry
 
 Every run prints a one-line summary on stderr at the end:

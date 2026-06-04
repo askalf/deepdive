@@ -32,6 +32,11 @@ export interface BrowserOptions {
   timeoutMs: number;
   maxBytes: number;
   userAgent?: string;
+  // When set, attach to an existing CDP browser at this endpoint
+  // (e.g. `http://host:9222`) instead of launching a local Chromium —
+  // no Playwright browser download required. `headless` and the stealth
+  // launch args are ignored in this mode (the remote browser owns them).
+  cdpEndpoint?: string;
 }
 
 export const DEFAULT_USER_AGENT =
@@ -55,11 +60,24 @@ export class BrowserSession {
   constructor(private readonly opts: BrowserOptions) {}
 
   async start(): Promise<void> {
-    this.browser = await chromium.launch({
-      headless: this.opts.headless,
-      args: STEALTH_ARGS,
-      ignoreDefaultArgs: ["--enable-automation"],
-    });
+    if (this.opts.cdpEndpoint) {
+      // Attach to an existing CDP browser (e.g. the askalf-browser bridge)
+      // rather than launching one. Launch args don't apply — the remote
+      // browser owns its own flags + stealth. Bounded by the fetch timeout
+      // so an unreachable endpoint fails fast instead of hanging.
+      this.browser = await chromium.connectOverCDP(this.opts.cdpEndpoint, {
+        timeout: this.opts.timeoutMs,
+      });
+    } else {
+      this.browser = await chromium.launch({
+        headless: this.opts.headless,
+        args: STEALTH_ARGS,
+        ignoreDefaultArgs: ["--enable-automation"],
+      });
+    }
+    // A fresh context isolates this run's pages on the (possibly shared)
+    // browser. Context-level options (UA, viewport, locale) apply in both
+    // launch and connect modes.
     this.context = await this.browser.newContext({
       userAgent: this.opts.userAgent ?? DEFAULT_USER_AGENT,
       viewport: { width: 1920, height: 1080 },
@@ -150,6 +168,10 @@ export class BrowserSession {
   }
 
   async close(): Promise<void> {
+    // Close the context we created. For a connectOverCDP session,
+    // browser.close() disconnects the CDP connection without terminating
+    // the remote browser (we didn't launch it) — so a shared bridge keeps
+    // running; for a launched browser it shuts the process down.
     await this.context?.close().catch(() => undefined);
     await this.browser?.close().catch(() => undefined);
     this.context = null;

@@ -79,6 +79,9 @@ Flags:
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
   --timeout-ms=<ms>             Per-fetch (browser) timeout. Default: 30000
+  --browser-cdp-endpoint=<url>  Attach to a running CDP browser (e.g. http://host:9222)
+                                instead of launching Chromium. Skips the Playwright
+                                browser download. Env: DEEPDIVE_BROWSER_CDP_ENDPOINT
   --llm-timeout-ms=<ms>         Per-LLM-call timeout. Default: 120000 (2 min)
   --llm-attempts=<n>            Max LLM attempts per call (with exponential
                                 backoff on 5xx/429/network errors). Default: 3
@@ -257,6 +260,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "timeout-ms":
           flags.timeoutMs = parsePositiveInt(value);
+          break;
+        case "browser-cdp-endpoint":
+          flags.browserCdpEndpoint = value;
           break;
         case "llm-timeout-ms":
           flags.llmTimeoutMs = parsePositiveInt(value);

@@ -389,20 +389,26 @@ async function browserChecks(opts: DoctorOptions): Promise<CheckResult[]> {
     detail: "module loaded",
   });
 
+  const cdpEndpoint = process.env.DEEPDIVE_BROWSER_CDP_ENDPOINT;
   const start = Date.now();
   try {
-    const browser = await playwright.chromium.launch({
-      headless: true,
-      args: ["--disable-dev-shm-usage"],
-    });
+    const browser = cdpEndpoint
+      ? await playwright.chromium.connectOverCDP(cdpEndpoint, { timeout: 10000 })
+      : await playwright.chromium.launch({
+          headless: true,
+          args: ["--disable-dev-shm-usage"],
+        });
+    const version = browser.version();
     await browser.close();
     const durationMs = Date.now() - start;
     out.push({
-      id: "browser.launch",
+      id: cdpEndpoint ? "browser.connect" : "browser.launch",
       category: "browser",
       status: "ok",
       label: "chromium",
-      detail: `launch + close in ${durationMs}ms`,
+      detail: cdpEndpoint
+        ? `connected to ${cdpEndpoint} (v${version}) in ${durationMs}ms`
+        : `launch + close in ${durationMs}ms`,
       durationMs,
     });
   } catch (err) {
