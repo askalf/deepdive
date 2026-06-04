@@ -362,7 +362,7 @@ export async function runAgent(
       const headroom = Math.max(0, config.maxSources - keptSources.length);
       const toFetch = allCandidates
         .slice(candidatesBefore)
-        .slice(0, Math.max(headroom, candidatesFoundThisRound));
+        .slice(0, Math.min(headroom, candidatesFoundThisRound));
 
       const fetched = await fetchMany(toFetch, config, ensureBrowser, signal);
 
