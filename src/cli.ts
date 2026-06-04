@@ -17,6 +17,7 @@ import { parseMaxCost, BudgetExceededError } from "./budget.js";
 import { resolveSearchAdapter } from "./search.js";
 import { runAgent, type AgentEvent } from "./agent.js";
 import { createCache } from "./cache.js";
+import { createRobotsCache } from "./robots.js";
 import { renderSourcesMarkdown, renderAnswerMarkdown } from "./citations.js";
 import { synthesize } from "./synthesize.js";
 import { verifyCitations as runVerify, type VerificationReport } from "./verify.js";
@@ -581,6 +582,10 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
         concurrency: config.concurrency,
         cache,
         respectRobots: config.respectRobots,
+        // Per-run in-memory robots.txt cache so each origin's robots.txt is
+        // fetched once, not once per URL (dropped previously — the CLI never
+        // supplied one, so canFetch's cache-miss path re-fetched every time).
+        robotsCache: createRobotsCache(),
         verifyCitations: config.verifyCitations,
         citeMinRecall: config.citeMinRecall,
         pdfMaxPages: config.pdfMaxPages,

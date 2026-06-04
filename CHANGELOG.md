@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-06-04
+
+### Fixed
+
+- **Fetch batch over-allocated when the source pool was nearly full** (`src/agent.ts`). The per-round batch was sliced to `Math.max(headroom, candidatesFoundThisRound)` — the *larger* of the two — so a round with 1 slot left but 5 candidates dispatched 5 Playwright fetches, discarding 4 once the keep-loop hit `maxSources`. Now capped at `Math.min`: the batch never exceeds the remaining headroom. Adds an agent-loop regression test (maxSources=2, 5 candidates → 2 fetches).
+- **`robots.txt` re-fetched once per URL instead of once per origin** (`src/cli.ts`). `runResearch` built the agent config but never supplied a `robotsCache`, so `canFetch`'s cache-miss path issued a fresh `GET <origin>/robots.txt` for every URL even when many shared a host. Now passes a per-run in-memory `createRobotsCache()`.
+
 ## [0.13.0] - 2026-05-28
 
 ### Added — `--search=auto` fallback mode

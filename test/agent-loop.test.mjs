@@ -160,6 +160,44 @@ test("agent: single-pass mode runs plan → search → fetch → synth", async (
   }
 });
 
+test("agent: caps the fetch batch at headroom, not candidates found (F1 regression)", async () => {
+  // maxSources=2 but the round surfaces 5 candidates. The fetch batch must be
+  // capped at the remaining headroom (2), not the larger candidate count — a
+  // prior Math.max bug dispatched all 5 Playwright fetches only to discard 3
+  // after the keep-loop hit maxSources. Fails on Math.max, passes on Math.min.
+  const planJson = '{"reasoning":"one facet","queries":["many results query"]}';
+  const synthText = "Answer grounded in the two kept sources [1][2].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const urls = ["a", "b", "c", "d", "e"].map((s) => `https://ex.com/${s}`);
+  const search = mockSearch({
+    "many results query": urls.map((url, i) => ({ url, title: `T${i}`, snippet: "..." })),
+  });
+  const pages = Object.fromEntries(urls.map((url) => [url, { text: LOREM, title: url }]));
+  const tracker = { opened: 0, fetched: [] };
+
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 2,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 4,
+      browserFactory: mockBrowserFactory(pages, tracker),
+    });
+
+    assert.equal(tracker.fetched.length, 2, "fetch batch capped at headroom (2), not the 5 candidates");
+    assert.equal(result.usage.fetched, 2);
+    assert.equal(result.sources.length, 2, "kept exactly maxSources");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("agent: --deep runs critic + follow-up round", async () => {
   const planJson =
     '{"reasoning":"initial pass","queries":["q1","q2"]}';
