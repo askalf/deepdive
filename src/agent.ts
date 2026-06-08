@@ -300,15 +300,26 @@ export async function runAgent(
   }
 
   let browser: BrowserLike | null = null;
+  let browserStarting: Promise<BrowserLike> | null = null;
   let answer = "";
   const makeBrowser =
     config.browserFactory ?? ((opts: BrowserOptions) => new BrowserSession(opts));
 
   async function ensureBrowser(): Promise<BrowserLike> {
-    if (browser) return browser;
-    browser = makeBrowser(config.browser);
-    await browser.start();
-    return browser;
+    // Single-flight: every concurrent caller awaits the SAME start() promise, so
+    // none can receive a browser that was assigned but not yet started. The
+    // previous code returned `browser` from an `if (browser)` guard that could
+    // fire while a first caller was still mid-`await browser.start()`. `browser`
+    // is still set so the close() in the cleanup path can reach it.
+    if (!browserStarting) {
+      browserStarting = (async () => {
+        const b = makeBrowser(config.browser);
+        browser = b;
+        await b.start();
+        return b;
+      })();
+    }
+    return browserStarting;
   }
 
   try {
