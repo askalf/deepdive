@@ -19,10 +19,11 @@ export interface FetchedPage {
   text: string;
   html: string;
   fetchedAt: number;
-  // Set when the response was a PDF; the agent then routes through
-  // src/pdf.ts for extraction. `bytes` is omitted from the cache file
-  // (cache stores `text`, the extracted prose) — `mimeType` is enough
-  // for the agent to know the source type on cache hits.
+  // Set when the response was a PDF; the agent routes through src/pdf.ts for
+  // extraction. The cache base64-encodes `bytes` (see cache.ts) so a PDF
+  // survives a warm-cache hit and the agent can re-extract on read — plain
+  // JSON.stringify used to corrupt the Uint8Array and silently drop the source.
+  // `mimeType` identifies the source type.
   mimeType?: string;
   bytes?: Uint8Array;
 }

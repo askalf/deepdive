@@ -1,7 +1,7 @@
 // SearXNG adapter. Points at an existing SearXNG instance (self-hosted or
 // public). Requires DEEPDIVE_SEARXNG_URL. Uses the JSON output format.
 
-import type { SearchAdapter, SearchResult } from "../search.js";
+import { searchTimeoutSignal, type SearchAdapter, type SearchResult } from "../search.js";
 import { trimTrailingSlashes } from "../url-util.js";
 
 export class SearXNGSearch implements SearchAdapter {
@@ -14,7 +14,7 @@ export class SearXNGSearch implements SearchAdapter {
     url.searchParams.set("format", "json");
     const res = await fetch(url, {
       headers: { accept: "application/json" },
-      signal,
+      signal: searchTimeoutSignal(signal),
     });
     if (!res.ok) throw new Error(`searxng ${res.status} ${res.statusText}`);
     const json = (await res.json()) as {

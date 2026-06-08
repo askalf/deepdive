@@ -1,6 +1,6 @@
 // Brave Search API adapter. Requires DEEPDIVE_BRAVE_KEY.
 
-import type { SearchAdapter, SearchResult } from "../search.js";
+import { searchTimeoutSignal, type SearchAdapter, type SearchResult } from "../search.js";
 
 export class BraveSearch implements SearchAdapter {
   readonly name = "brave";
@@ -15,7 +15,7 @@ export class BraveSearch implements SearchAdapter {
         accept: "application/json",
         "x-subscription-token": this.key,
       },
-      signal,
+      signal: searchTimeoutSignal(signal),
     });
     if (!res.ok) throw new Error(`brave ${res.status} ${res.statusText}`);
     const json = (await res.json()) as {

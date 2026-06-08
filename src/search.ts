@@ -15,6 +15,17 @@ export interface SearchAdapter {
   search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]>;
 }
 
+// Per-request search timeout. Adapters previously passed only the caller's
+// abort signal (wired to SIGINT/SIGTERM), so a hung search endpoint blocked the
+// whole run with no escape. Combine the caller's signal with a hard timeout,
+// mirroring the per-request timeout robots.ts already applies. Override the
+// 15s default via DEEPDIVE_SEARCH_TIMEOUT_MS.
+export function searchTimeoutSignal(signal?: AbortSignal): AbortSignal {
+  const ms = Number(process.env["DEEPDIVE_SEARCH_TIMEOUT_MS"]) || 15_000;
+  const timeout = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 export async function resolveSearchAdapter(
   name: string,
   env: Record<string, string | undefined>,

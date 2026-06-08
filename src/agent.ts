@@ -128,7 +128,12 @@ export type AgentEvent =
   | {
       type: "fetch.skipped";
       url: string;
-      reason: "robots" | "pdf-no-extractor" | "domain-deny" | "domain-not-allowed";
+      reason:
+        | "robots"
+        | "pdf-no-extractor"
+        | "pdf-extract-error"
+        | "domain-deny"
+        | "domain-not-allowed";
     }
   | { type: "include.done"; ingested: number; skipped: number }
   | { type: "synthesize.start"; sourceCount: number; round: number }
@@ -399,13 +404,17 @@ export async function runAgent(
             content = result.text;
             title = f.candidate.title || basenameFromUrl(f.page.finalUrl || f.page.url);
           } catch (err) {
-            if (err instanceof PdfExtractorMissingError) {
-              emit(config, {
-                type: "fetch.skipped",
-                url: f.page.url,
-                reason: "pdf-no-extractor",
-              });
-            }
+            // A genuine extraction failure (corrupt/unsupported PDF) used to
+            // fall through to a bare `continue`, silently dropping the source.
+            // Emit a skip event either way so the loss is visible.
+            emit(config, {
+              type: "fetch.skipped",
+              url: f.page.url,
+              reason:
+                err instanceof PdfExtractorMissingError
+                  ? "pdf-no-extractor"
+                  : "pdf-extract-error",
+            });
             continue;
           }
           // Apply the same word cap as web sources.
