@@ -10,6 +10,7 @@
 // robots.txt content can change rapidly on the publisher's end.
 
 export interface RobotsRule {
+  agent: string;
   allow: boolean;
   path: string;
 }
@@ -145,14 +146,11 @@ export function parseRobotsTxt(text: string): ParsedRobots {
   }
 
   return {
-    rules: grouped.map((g) => ({ allow: g.allow, path: g.path })),
+    // Full rules in file order, each carrying its user-agent. isPathAllowed
+    // reads these directly (longest-match per RFC 9309).
+    rules: grouped,
     crawlDelaySec: crawlDelay,
-    // We stash the grouping by keeping a hidden field. But since we want a
-    // clean exported type, bake agent-matching in: we'll re-do the parse at
-    // check time. Simpler: re-parse cheaply or store a bigger structure.
-    // Actually let's just store the grouped form and compute at check time:
-    ...({ _grouped: grouped } as object),
-  } as ParsedRobots;
+  };
 }
 
 // Exported for unit tests.
@@ -161,7 +159,7 @@ export function isPathAllowed(
   path: string,
   userAgent: string,
 ): boolean {
-  const grouped = (parsed as unknown as { _grouped?: { agent: string; allow: boolean; path: string }[] })._grouped ?? [];
+  const grouped = parsed.rules;
   if (grouped.length === 0) return true;
   const ua = userAgent.toLowerCase();
 

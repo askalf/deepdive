@@ -5,7 +5,7 @@
 //
 // If DDG changes their HTML layout, this breaks. Regenerate parser accordingly.
 
-import type { SearchAdapter, SearchResult } from "../search.js";
+import { searchTimeoutSignal, type SearchAdapter, type SearchResult } from "../search.js";
 
 const ENDPOINT = "https://html.duckduckgo.com/html/";
 
@@ -23,7 +23,7 @@ export class DuckDuckGoSearch implements SearchAdapter {
           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       },
       body: form.toString(),
-      signal,
+      signal: searchTimeoutSignal(signal),
     });
     if (!res.ok) throw new Error(`duckduckgo ${res.status} ${res.statusText}`);
     const html = await res.text();

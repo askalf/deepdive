@@ -24,6 +24,31 @@ export interface PageCache {
   readonly misses: number;
 }
 
+// FetchedPage may carry a Uint8Array `bytes` field (raw PDF data). Plain
+// JSON.stringify turns a Uint8Array into a positional object ({"0":..,"1":..})
+// and JSON.parse never restores it, so a cached PDF page came back with a
+// truthy-but-useless `bytes` and was silently dropped at extraction time. Tag
+// any Uint8Array as base64 on write and restore it on read so PDFs survive the
+// cache round-trip.
+const U8_TAG = "__u8_b64__";
+
+function serializePage(page: FetchedPage): string {
+  return JSON.stringify(page, (_key, value) =>
+    value instanceof Uint8Array
+      ? { [U8_TAG]: Buffer.from(value).toString("base64") }
+      : value,
+  );
+}
+
+function deserializePage(raw: string): FetchedPage {
+  return JSON.parse(raw, (_key, value) => {
+    if (value && typeof value === "object" && typeof value[U8_TAG] === "string") {
+      return new Uint8Array(Buffer.from(value[U8_TAG], "base64"));
+    }
+    return value;
+  }) as FetchedPage;
+}
+
 export function createCache(opts: CacheOptions): PageCache {
   const state = { hits: 0, misses: 0, mkdired: false };
 
@@ -55,7 +80,7 @@ export function createCache(opts: CacheOptions): PageCache {
           return null;
         }
         const raw = await fs.readFile(path, "utf-8");
-        const page = JSON.parse(raw) as FetchedPage;
+        const page = deserializePage(raw);
         state.hits++;
         return page;
       } catch {
@@ -67,7 +92,7 @@ export function createCache(opts: CacheOptions): PageCache {
       await ensureDir();
       const path = join(opts.dir, cacheKey(url) + ".json");
       const tmp = path + ".tmp." + process.pid;
-      await fs.writeFile(tmp, JSON.stringify(page), "utf-8");
+      await fs.writeFile(tmp, serializePage(page), "utf-8");
       await fs.rename(tmp, path);
     },
   };

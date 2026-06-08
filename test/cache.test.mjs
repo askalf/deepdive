@@ -42,6 +42,35 @@ test("put then get round-trips a FetchedPage", async () => {
   }
 });
 
+test("put then get preserves a Uint8Array bytes field (PDF source not silently dropped)", async () => {
+  const { dir, cleanup } = tmp();
+  try {
+    const cache = createCache({ dir, ttlMs: 60_000 });
+    const bytes = new Uint8Array([37, 80, 68, 70, 0, 255, 128, 10]); // %PDF + edge bytes
+    const page = {
+      url: "https://example.com/doc.pdf",
+      finalUrl: "https://example.com/doc.pdf",
+      status: 200,
+      title: "",
+      text: "",
+      html: "",
+      fetchedAt: Date.now(),
+      mimeType: "application/pdf",
+      bytes,
+    };
+    await cache.put(page.url, page);
+    const got = await cache.get(page.url);
+    // Regression: plain JSON.stringify turned `bytes` into a positional object
+    // ({"0":..}) that JSON.parse never restored, so the PDF source was silently
+    // dropped at extraction time on every warm-cache hit.
+    assert.ok(got.bytes instanceof Uint8Array, "bytes must round-trip as a Uint8Array");
+    assert.deepEqual([...got.bytes], [...bytes]);
+    assert.equal(got.mimeType, "application/pdf");
+  } finally {
+    cleanup();
+  }
+});
+
 test("get on missing url returns null and counts miss", async () => {
   const { dir, cleanup } = tmp();
   try {
