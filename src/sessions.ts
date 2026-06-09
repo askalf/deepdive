@@ -222,3 +222,88 @@ export function humanDuration(ms: number): string {
   const d = Math.floor(h / 24);
   return `${d}d ago`;
 }
+
+// ── Lifecycle: delete + prune ────────────────────────────────────────────────
+
+// Deletes a single session file by exact id. Resolve a prefix with
+// resolveSessionId first. Throws ENOENT if the file is already gone.
+export async function deleteSession(
+  id: string,
+  opts: SessionStorageOptions,
+): Promise<void> {
+  await fs.unlink(join(opts.dir, `${id}.json`));
+}
+
+export interface PruneCriteria {
+  // Prune sessions older than this many ms (relative to `now`).
+  olderThanMs?: number;
+  // Always retain the newest `keep` sessions regardless of age.
+  keep?: number;
+  // Injectable clock for tests. Defaults to Date.now() at call time.
+  now?: number;
+}
+
+// Exported for unit tests. Pure selection: given metadata (newest-first, as
+// listSessions returns) and the criteria, returns the sessions that should be
+// removed. With neither criterion set, returns [] — never prunes everything by
+// default; the CLI requires at least one of --older-than / --keep.
+export function selectSessionsToPrune(
+  metas: SessionMeta[],
+  crit: PruneCriteria,
+): SessionMeta[] {
+  if (crit.olderThanMs === undefined && crit.keep === undefined) return [];
+  const now = crit.now ?? Date.now();
+  const keep = crit.keep ?? 0;
+  const out: SessionMeta[] = [];
+  metas.forEach((m, idx) => {
+    if (idx < keep) return; // protected: among the newest `keep`
+    if (crit.olderThanMs !== undefined && now - m.createdAt < crit.olderThanMs) {
+      return; // too new to prune
+    }
+    out.push(m);
+  });
+  return out;
+}
+
+// Lists, selects, and (unless dryRun) deletes matching sessions. Returns the
+// metadata of removed sessions, the count still remaining, and any unparsable
+// files encountered while listing.
+export async function pruneSessions(
+  opts: SessionStorageOptions,
+  crit: PruneCriteria & { dryRun?: boolean },
+): Promise<{ removed: SessionMeta[]; remaining: number; bad: string[] }> {
+  const { sessions, bad } = await listSessions(opts);
+  const toRemove = selectSessionsToPrune(sessions, crit);
+  if (!crit.dryRun) {
+    for (const m of toRemove) {
+      await deleteSession(m.id, opts).catch(() => undefined);
+    }
+  }
+  return {
+    removed: toRemove,
+    remaining: sessions.length - toRemove.length,
+    bad,
+  };
+}
+
+// Exported for unit tests. Parses a human duration like "30d", "12h", "90m",
+// "45s", "2w" into milliseconds. A bare integer is interpreted as days
+// (the common "prune things older than N days" case). Returns undefined for
+// unparsable input.
+export function parseDuration(s: string | undefined): number | undefined {
+  if (!s) return undefined;
+  const t = s.trim().toLowerCase();
+  const m = /^(\d+)\s*(w|d|h|m|s)?$/.exec(t);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  const unit = m[2] ?? "d";
+  const mult: Record<string, number> = {
+    s: 1000,
+    m: 60_000,
+    h: 3_600_000,
+    d: 86_400_000,
+    w: 604_800_000,
+  };
+  return n * mult[unit];
+}

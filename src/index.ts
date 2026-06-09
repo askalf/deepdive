@@ -95,10 +95,39 @@ export {
   renderSessionsList,
   defaultSessionsDir,
   humanDuration,
+  deleteSession,
+  pruneSessions,
+  selectSessionsToPrune,
+  parseDuration,
   type SessionRecord,
   type SessionMeta,
   type SessionStorageOptions,
+  type PruneCriteria,
 } from "./sessions.js";
+export {
+  markdownToHtml,
+  renderInline,
+  escapeHtml,
+  type MarkdownToHtmlOptions,
+} from "./markdown.js";
+export {
+  renderHtmlReport,
+  type HtmlReportOptions,
+} from "./html-export.js";
+export {
+  diffSessions,
+  diffSources,
+  diffLines,
+  renderDiffText,
+  buildDiffNarrateUser,
+  DIFF_NARRATE_SYSTEM,
+  type SessionDiff,
+  type SourceRef,
+  type DiffLine,
+  type LineKind,
+  type SessionSide,
+  type RenderDiffOptions,
+} from "./diff.js";
 export {
   detectApiFormat,
   toOpenAIRequest,

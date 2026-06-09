@@ -34,7 +34,18 @@ import {
   listSessions,
   resolveSessionId,
   renderSessionsList,
+  deleteSession,
+  pruneSessions,
+  parseDuration,
 } from "./sessions.js";
+import { renderHtmlReport } from "./html-export.js";
+import {
+  diffSessions,
+  renderDiffText,
+  DIFF_NARRATE_SYSTEM,
+  buildDiffNarrateUser,
+} from "./diff.js";
+import { callLLM } from "./llm.js";
 import {
   runDoctor,
   renderDoctorText,
@@ -55,6 +66,13 @@ Usage:
   deepdive continue <id> [<question>]      Full agent run seeded with the saved session's
                                            sources (plans + searches + fetches new pages;
                                            saved as a new session linked via parentId)
+  deepdive export <id> [--format=html|md]  Render a saved session as a shareable artifact
+                                           (--out=report.html). Format inferred from --out.
+  deepdive diff <id-a> <id-b> [--narrate]  Show how the answer + source set changed between
+                                           two saved runs. --narrate adds an LLM summary.
+  deepdive sessions rm <id> [<id>...]      Delete one or more saved sessions
+  deepdive sessions prune --older-than=30d Delete old sessions (and/or --keep=<n> newest;
+                                           --dry-run to preview)
   deepdive --help                          Show this help
 
 Flags:
@@ -111,6 +129,11 @@ Flags:
                                 everything else to anthropic).
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
+  --format=<html|md>            export: output format (default: inferred from --out, else html)
+  --narrate                     diff: add a one-shot LLM summary of what changed
+  --older-than=<dur>            sessions prune: age cutoff — 30d, 12h, 90m, 2w
+  --keep=<n>                    sessions prune: always retain the newest <n> sessions
+  --dry-run                     sessions prune: report what would be deleted, delete nothing
   --verbose, -v                 Stream progress events to stderr
   --no-stream                   Buffer the final answer instead of streaming
                                 tokens to stdout (auto-off for --json and
@@ -154,6 +177,8 @@ const SUBCOMMAND_VERBS = new Set([
   "show",
   "resume",
   "continue",
+  "export",
+  "diff",
 ]);
 
 // Exported for unit tests.
@@ -203,6 +228,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--no-stream") {
       flags.noStream = true;
+      continue;
+    }
+    if (a === "--narrate") {
+      flags.narrate = true;
+      continue;
+    }
+    if (a === "--dry-run") {
+      flags.dryRun = true;
       continue;
     }
     if (a === "--deep") {
@@ -313,6 +346,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "out":
           outPath = value;
+          break;
+        case "format":
+          flags.format = value.toLowerCase();
+          break;
+        case "older-than":
+          flags.olderThan = value;
+          break;
+        case "keep":
+          flags.keep = parseNonNegativeInt(value);
           break;
         default:
           throw new Error(`unknown flag: --${key}`);
@@ -523,6 +565,12 @@ async function main(argv: string[]): Promise<number> {
   }
   if (parsed.question === "continue") {
     return await continueCommand(parsed);
+  }
+  if (parsed.question === "export") {
+    return await exportCommand(parsed);
+  }
+  if (parsed.question === "diff") {
+    return await diffCommand(parsed);
   }
   if (!parsed.question) {
     process.stderr.write(`deepdive: missing question.\n\n${USAGE}`);
@@ -758,10 +806,24 @@ function writeSessionHint(id: string): void {
 async function sessionsCommand(parsed: ParsedArgs): Promise<number> {
   const config = resolveConfig(parsed.flags, process.env);
   const sub = parsed.extras[0] ?? "ls";
-  if (sub !== "ls") {
-    process.stderr.write(`deepdive: unknown sessions sub-command: ${sub}\n`);
-    return 2;
+  switch (sub) {
+    case "ls":
+      return await sessionsLs(config);
+    case "rm":
+      return await sessionsRm(parsed, config);
+    case "prune":
+      return await sessionsPrune(parsed, config);
+    default:
+      process.stderr.write(
+        `deepdive: unknown sessions sub-command: ${sub} (try: ls | rm | prune)\n`,
+      );
+      return 2;
   }
+}
+
+async function sessionsLs(
+  config: import("./config.js").RuntimeConfig,
+): Promise<number> {
   const { sessions, bad } = await listSessions({ dir: config.sessions.dir });
   if (config.jsonOutput) {
     process.stdout.write(JSON.stringify({ sessions, bad }, null, 2) + "\n");
@@ -774,6 +836,182 @@ async function sessionsCommand(parsed: ParsedArgs): Promise<number> {
     );
   }
   return 0;
+}
+
+async function sessionsRm(
+  parsed: ParsedArgs,
+  config: import("./config.js").RuntimeConfig,
+): Promise<number> {
+  const idArgs = parsed.extras.slice(1);
+  if (idArgs.length === 0) {
+    process.stderr.write(
+      `deepdive: sessions rm requires at least one session id (try \`deepdive sessions ls\`)\n`,
+    );
+    return 2;
+  }
+  let failed = 0;
+  for (const idArg of idArgs) {
+    try {
+      const id = await resolveSessionId(idArg, { dir: config.sessions.dir });
+      await deleteSession(id, { dir: config.sessions.dir });
+      process.stdout.write(`removed ${id}\n`);
+    } catch (err) {
+      failed++;
+      process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    }
+  }
+  return failed > 0 ? 1 : 0;
+}
+
+async function sessionsPrune(
+  parsed: ParsedArgs,
+  config: import("./config.js").RuntimeConfig,
+): Promise<number> {
+  const { olderThan, keep, dryRun } = parsed.flags;
+  if (olderThan === undefined && keep === undefined) {
+    process.stderr.write(
+      `deepdive: sessions prune needs --older-than=<dur> and/or --keep=<n>\n` +
+        `  e.g. deepdive sessions prune --older-than=30d\n` +
+        `       deepdive sessions prune --keep=20\n` +
+        `       deepdive sessions prune --older-than=7d --keep=5 --dry-run\n`,
+    );
+    return 2;
+  }
+  let olderThanMs: number | undefined;
+  if (olderThan !== undefined) {
+    olderThanMs = parseDuration(olderThan);
+    if (olderThanMs === undefined) {
+      process.stderr.write(
+        `deepdive: --older-than must be a duration like 30d, 12h, 90m, 2w (got: ${olderThan})\n`,
+      );
+      return 2;
+    }
+  }
+  const { removed, remaining, bad } = await pruneSessions(
+    { dir: config.sessions.dir },
+    { olderThanMs, keep, dryRun },
+  );
+  if (config.jsonOutput) {
+    process.stdout.write(
+      JSON.stringify({ removed, remaining, bad, dryRun: !!dryRun }, null, 2) + "\n",
+    );
+    return 0;
+  }
+  const verb = dryRun ? "would remove" : "removed";
+  process.stdout.write(
+    `${verb} ${removed.length} session${removed.length === 1 ? "" : "s"} · ${remaining} remaining\n`,
+  );
+  for (const m of removed) {
+    const q = m.question.length > 60 ? m.question.slice(0, 59) + "…" : m.question;
+    process.stdout.write(`  ${dryRun ? "-" : "✓"} ${m.id}  ${q}\n`);
+  }
+  if (bad.length > 0) {
+    process.stderr.write(
+      `\n(${bad.length} unparsable session file${bad.length === 1 ? "" : "s"} left in place)\n`,
+    );
+  }
+  return 0;
+}
+
+// `deepdive export <id> [--format=html|md] [--out=path]` — render a saved
+// session as a shareable artifact. HTML is a single self-contained document;
+// md re-renders the original cited markdown. Format is inferred from --out's
+// extension when not given, defaulting to html.
+async function exportCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const idArg = parsed.extras[0];
+  if (!idArg) {
+    process.stderr.write(
+      `deepdive: export requires a session id (try \`deepdive sessions ls\`)\n`,
+    );
+    return 2;
+  }
+  const format =
+    parsed.flags.format ?? inferFormatFromPath(parsed.outPath) ?? "html";
+  if (format !== "html" && format !== "md" && format !== "markdown") {
+    process.stderr.write(`deepdive: --format must be html or md (got: ${format})\n`);
+    return 2;
+  }
+  try {
+    const id = await resolveSessionId(idArg, { dir: config.sessions.dir });
+    const record = await loadSession(id, { dir: config.sessions.dir });
+    const output =
+      format === "html"
+        ? renderHtmlReport(record)
+        : renderAnswerMarkdown(record.question, record.answer, record.sources) +
+          renderCitationHealthFooter(record.verification);
+    if (parsed.outPath) {
+      const path = resolve(parsed.outPath);
+      writeFileSync(path, output, "utf-8");
+      process.stderr.write(`wrote ${path}\n`);
+    } else {
+      process.stdout.write(output + (output.endsWith("\n") ? "" : "\n"));
+    }
+    return 0;
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return 1;
+  }
+}
+
+function inferFormatFromPath(p: string | undefined): string | undefined {
+  if (!p) return undefined;
+  const lower = p.toLowerCase();
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
+  if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "md";
+  return undefined;
+}
+
+// `deepdive diff <id-a> <id-b> [--narrate] [--json]` — show how the answer
+// (and the sources behind it) changed between two saved runs. The local-only
+// longitudinal view. `--narrate` adds a one-shot LLM summary of the change.
+async function diffCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const [idArgA, idArgB] = parsed.extras;
+  if (!idArgA || !idArgB) {
+    process.stderr.write(
+      `deepdive: diff requires two session ids (try \`deepdive sessions ls\`)\n`,
+    );
+    return 2;
+  }
+  const ac = new AbortController();
+  const sigint = () => ac.abort();
+  process.on("SIGINT", sigint);
+  process.on("SIGTERM", sigint);
+  try {
+    const dir = { dir: config.sessions.dir };
+    const a = await loadSession(await resolveSessionId(idArgA, dir), dir);
+    const b = await loadSession(await resolveSessionId(idArgB, dir), dir);
+    const diff = diffSessions(a, b);
+
+    let narration: string | undefined;
+    if (parsed.flags.narrate) {
+      const { text } = await callLLM(
+        [{ role: "user", content: buildDiffNarrateUser(a, b) }],
+        DIFF_NARRATE_SYSTEM,
+        config.llm,
+        ac.signal,
+      );
+      narration = text.trim();
+    }
+
+    if (config.jsonOutput) {
+      process.stdout.write(JSON.stringify({ diff, narration }, null, 2) + "\n");
+      return 0;
+    }
+    const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+    process.stdout.write(renderDiffText(diff, { color: useColor }) + "\n");
+    if (narration) {
+      process.stdout.write(`\n## What changed (narrated)\n\n${narration}\n`);
+    }
+    return 0;
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return 1;
+  } finally {
+    process.off("SIGINT", sigint);
+    process.off("SIGTERM", sigint);
+  }
 }
 
 async function showCommand(parsed: ParsedArgs): Promise<number> {

@@ -414,9 +414,13 @@ Four subcommands operate on saved sessions:
 
 ```bash
 deepdive sessions ls                          # newest first; id, age, source/round counts, question
+deepdive sessions rm <id> [<id>...]           # delete one or more sessions
+deepdive sessions prune --older-than=30d      # delete old sessions (and/or --keep=N; --dry-run to preview)
 deepdive show <id>                            # re-print the original markdown answer
 deepdive resume <id> [<new-question>]         # re-synthesize against the saved sources (cheap)
 deepdive continue <id> [<refined-question>]   # full run seeded with saved sources (adds new pages)
+deepdive export <id> --format=html            # render a shareable, self-contained report
+deepdive diff <id-a> <id-b>                   # how the answer + sources changed between two runs
 ```
 
 `resume` is the cheap iteration path: it re-runs the synthesizer (one LLM call) against the existing source corpus, optionally with a new question or refinement. No re-search, no re-fetch, no critic loop. This closes the iteration loop that the page cache opens — the cache stops re-fetching pages, but `resume` stops re-running the entire pipeline. Refining "what does X say about Y" into "what does X say about Y in the post-2024 era" costs one synthesis instead of an entire deep run.
@@ -425,7 +429,51 @@ deepdive continue <id> [<refined-question>]   # full run seeded with saved sourc
 
 IDs are timestamp-prefixed (`YYYY-MM-DD_HHMMSS_<8-hex>`), so they sort chronologically and you can pass a unique prefix instead of typing the full id (`deepdive resume 2026-05-07_134509`).
 
+`prune` keeps your local corpus from growing unbounded. `--older-than` takes a duration (`30d`, `12h`, `90m`, `2w`, or a bare integer = days); `--keep=N` always retains the newest N regardless of age; pass both and a session is removed only when it's past the keep-newest set *and* older than the cutoff. `--dry-run` prints exactly what would go without deleting anything. With neither flag, `prune` refuses to run — it will never wipe your history by default.
+
 Disable with `--no-sessions` or `DEEPDIVE_NO_SESSIONS=1`. Change the dir with `DEEPDIVE_SESSIONS_DIR`.
+
+---
+
+## Export a shareable report
+
+Terminal markdown is great for you; it's not what you hand a colleague. `deepdive export` turns any saved session into a polished, **single-file, self-contained HTML document** — inline CSS, zero scripts, no remote assets, light/dark aware, print-friendly. It opens in any browser, emails cleanly, and commits as an artifact. Inline `[N]` citations become superscript links that jump to the source list.
+
+```bash
+deepdive export 2026-05-07_134509 --out=report.html      # format inferred from .html
+deepdive export 2026-05-07 --format=html > report.html   # or to stdout
+deepdive export 2026-05-07 --format=md                   # re-render the original cited markdown
+```
+
+The markdown→HTML rendering is hand-rolled (`src/markdown.ts`) so the export adds **no runtime dependency** — same audit-it-in-an-afternoon guarantee as the rest of the tool. The HTML is produced from the saved session, so you can export a run you did weeks ago without re-spending a token.
+
+---
+
+## Diff two runs — research over time
+
+This is the thing a hosted tool structurally can't give you: your past research is *your* local corpus, so you can ask "what changed since last time?" entirely offline. `deepdive diff` compares two saved sessions and shows how the answer — and the sources behind it — moved between them.
+
+```bash
+deepdive diff 2026-05-07 2026-06-01
+```
+
+```
+diff  2026-05-07_120000_aaaaaaaa  →  2026-06-01_120000_bbbbbbbb
+      25d apart · 2026-05-07 → 2026-06-01
+
+  metadata
+    model     claude-sonnet-4-6 → claude-opus-4-7
+    sources   2
+  sources   +1 / -1 / 1 shared
+    + https://newsource.com/z
+    - https://example.com/y
+  answer    +1 / -1 lines (3 unchanged)
+    …
+    - the 5-hour bucket resets on a rolling window [2]
+    + the 5-hour bucket resets at a fixed UTC boundary [2]
+```
+
+The source-set delta (added / removed / shared) is keyed on the normalized URL, and the answer diff is a deterministic line diff with collapsed unchanged context. Add `--narrate` for a one-shot LLM summary of what *substantively* changed — new claims, dropped claims, reversals — instead of reading the line diff yourself. `--json` emits the structured diff (and narration) for piping. Re-run the same question monthly with `deepdive continue`, then `diff` the sessions to watch a fast-moving topic evolve.
 
 ---
 
