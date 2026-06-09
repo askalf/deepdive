@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — research workspace: export, diff, session lifecycle
+
+Your saved sessions are a local research corpus you own. Three commands turn that history into a workspace hosted tools structurally can't offer (your data never left your machine, so it's there to revisit):
+
+- **`deepdive export <id> [--format=html|md] [--out=path]`** — render a saved session as a shareable artifact. HTML output is a **single self-contained document**: inline CSS, no scripts, no remote assets, light/dark aware, print-friendly; inline `[N]` citations become superscript anchors into the source list. Format is inferred from `--out`'s extension (`.html`/`.md`), defaulting to HTML. The markdown→HTML renderer (`src/markdown.ts`) is hand-rolled, so export adds **no runtime dependency**.
+- **`deepdive diff <id-a> <id-b> [--narrate] [--json]`** — show how the answer and its source set changed between two runs. Source-set delta (added/removed/shared) keyed on the normalized URL; a deterministic LCS line diff of the answer with collapsed unchanged context; metadata deltas (model, sources, rounds, cost). `--narrate` adds a one-shot LLM summary of what *substantively* changed (new/dropped claims, reversals). The longitudinal "what changed since last month?" view, answered entirely from local history.
+- **`deepdive sessions rm <id> [<id>...]`** and **`deepdive sessions prune [--older-than=<dur>] [--keep=<n>] [--dry-run]`** — lifecycle management so the corpus doesn't grow unbounded. `--older-than` takes `30d`/`12h`/`90m`/`2w`/bare-days; `--keep=N` always retains the newest N; both together prune only sessions past the keep-set *and* older than the cutoff. `--dry-run` previews. With neither flag, `prune` refuses to run — history is never wiped by default.
+
+New modules: `src/markdown.ts` (Markdown→HTML), `src/html-export.ts` (report renderer), `src/diff.ts` (session diff). New `sessions.ts` helpers: `deleteSession`, `pruneSessions`, `selectSessionsToPrune`, `parseDuration`. All exported from the library entry point. 44 new tests.
+
 ## [0.13.2] - 2026-06-04
 
 ### Added

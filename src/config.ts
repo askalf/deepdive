@@ -84,6 +84,14 @@ export interface CLIFlags {
   // When set, attach to an existing CDP browser (e.g. a shared browser
   // container) instead of launching a local Chromium. Env: DEEPDIVE_BROWSER_CDP_ENDPOINT.
   browserCdpEndpoint?: string;
+  // Subcommand-scoped flags. These don't affect a research run, so
+  // resolveConfig ignores them — they're read directly by the export / diff /
+  // sessions-prune handlers off ParsedArgs.flags.
+  format?: string; // `deepdive export` output format: html | md
+  narrate?: boolean; // `deepdive diff --narrate`: LLM summary of the change
+  dryRun?: boolean; // `deepdive sessions prune --dry-run`: report, don't delete
+  olderThan?: string; // `deepdive sessions prune --older-than=30d`
+  keep?: number; // `deepdive sessions prune --keep=20`
 }
 
 const DEFAULTS = {
