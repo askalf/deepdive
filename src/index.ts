@@ -74,6 +74,7 @@ export {
   findNearDuplicate,
   DEFAULT_NEAR_DUPE_THRESHOLD,
 } from "./similarity.js";
+export { MultiSearch, interleaveResults } from "./search/multi.js";
 export {
   aggregateSessionStats,
   renderStats,
