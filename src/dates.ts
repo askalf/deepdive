@@ -180,6 +180,29 @@ function walk(node: unknown, out: { published?: string; modified?: string }): vo
   }
 }
 
+// Exported for unit tests. Resolve a `--since` value to an absolute epoch-ms
+// cutoff. Accepts a relative duration with an explicit unit (`30d`, `2w`,
+// `12h`) — interpreted as "now minus that" — or an absolute date (`2024`,
+// `2024-06`, `2024-06-15`). A bare 4-digit number is treated as a YEAR, not a
+// day count, since `--since=2024` overwhelmingly means "since 2024". Returns
+// undefined for unparseable input.
+export function resolveSince(value: string, now: number = Date.now()): number | undefined {
+  const v = value.trim().toLowerCase();
+  const dur = /^(\d+)\s*(w|d|h|m|s)$/.exec(v);
+  if (dur) {
+    const mult: Record<string, number> = {
+      s: 1000,
+      m: 60_000,
+      h: 3_600_000,
+      d: 86_400_000,
+      w: 604_800_000,
+    };
+    return now - Number(dur[1]) * mult[dur[2]];
+  }
+  if (/^\d{4}$/.test(v)) return toEpoch(`${v}-01-01`, now);
+  return toEpoch(v, now);
+}
+
 // Exported for unit tests. Parse a date string to epoch ms, rejecting values
 // outside [1990-01-01, now + 2 days]. Bare YYYY / YYYY-MM are accepted.
 export function toEpoch(s: string, now: number = Date.now()): number | undefined {

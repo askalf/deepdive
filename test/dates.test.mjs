@@ -7,6 +7,7 @@ import {
   metaTags,
   jsonLdDates,
   toEpoch,
+  resolveSince,
 } from "../dist/dates.js";
 
 const NOW = Date.UTC(2026, 5, 1);
@@ -92,4 +93,25 @@ test("extractPublishedDate: undefined when nothing usable is present", () => {
 test("extractPublishedDate: a future/garbage meta date is rejected, not returned", () => {
   const html = `<meta name="date" content="3999-01-01">`;
   assert.equal(extractPublishedDate(html, NOW), undefined);
+});
+
+// ── resolveSince ─────────────────────────────────────────────────────────────
+
+test("resolveSince: a duration with a unit is relative to now", () => {
+  assert.equal(resolveSince("30d", NOW), NOW - 30 * 86_400_000);
+  assert.equal(resolveSince("2w", NOW), NOW - 14 * 86_400_000);
+  assert.equal(resolveSince("12h", NOW), NOW - 12 * 3_600_000);
+});
+
+test("resolveSince: a bare 4-digit value is a YEAR, not a day count", () => {
+  assert.equal(iso(resolveSince("2024", NOW)), "2024-01-01");
+});
+
+test("resolveSince: absolute dates parse", () => {
+  assert.equal(iso(resolveSince("2024-06-15", NOW)), "2024-06-15");
+});
+
+test("resolveSince: junk returns undefined", () => {
+  assert.equal(resolveSince("whenever", NOW), undefined);
+  assert.equal(resolveSince("3999", NOW), undefined); // out of range year
 });

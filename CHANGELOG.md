@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — `--since` recency filter
+
+- **`--since=<date|duration>`** (env `DEEPDIVE_SINCE`) — drop fetched sources published before a cutoff, building on v0.14's published-date extraction. Accepts an absolute date (`2024`, `2024-06`, `2024-06-15`) or a relative duration meaning "that long ago" (`30d`, `12h`, `2w`). A web source whose detected publication date precedes the cutoff is skipped (new `stale` `fetch.skipped` reason); sources with no detectable date are kept (no penalty for missing metadata). Doesn't apply to `--include` / `continue` sources. New pure `resolveSince` (exported); persistable as `since` in the config file. A supplied-but-unparseable `--since` is a hard error (exit 2), not a silent no-op.
+
 ## [0.14.0] - 2026-06-09
 
 ### Added — config file, named profiles, shell completion

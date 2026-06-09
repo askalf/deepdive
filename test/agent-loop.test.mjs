@@ -1013,6 +1013,53 @@ test("agent: maxCostUsd aborts after the call that crosses the cap", async () =>
   }
 });
 
+test("agent: --since drops sources dated before the cutoff, keeps fresh + dateless", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1][2].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const meta = (d) =>
+    `<html><head><meta property="article:published_time" content="${d}"></head><body>${LOREM}</body></html>`;
+  const search = mockSearch({
+    q1: [
+      { url: "https://ex.com/old", title: "Old", snippet: "" },
+      { url: "https://ex.com/fresh", title: "Fresh", snippet: "" },
+      { url: "https://ex.com/nodate", title: "NoDate", snippet: "" },
+    ],
+  });
+  const pages = {
+    "https://ex.com/old": { text: LOREM, title: "Old", html: meta("2020-03-01") },
+    "https://ex.com/fresh": { text: LOREM, title: "Fresh", html: meta("2026-05-01") },
+    "https://ex.com/nodate": { text: LOREM, title: "NoDate" }, // html has no date
+  };
+  const skipped = [];
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 2,
+      sinceMs: Date.UTC(2024, 0, 1),
+      browserFactory: mockBrowserFactory(pages),
+      onEvent: (e) => {
+        if (e.type === "fetch.skipped") skipped.push(e);
+      },
+    });
+    const urls = result.sources.map((s) => s.url).sort();
+    assert.deepEqual(urls, ["https://ex.com/fresh", "https://ex.com/nodate"]);
+    assert.equal(skipped.length, 1);
+    assert.equal(skipped[0].reason, "stale");
+    assert.equal(skipped[0].url, "https://ex.com/old");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("agent: undefined maxCostUsd means no cap, run completes", async () => {
   // Same setup as above but no cap — should finish.
   const planJson =

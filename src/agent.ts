@@ -106,6 +106,11 @@ export interface AgentConfig {
   // v0.14.0 — when true, the synthesizer leads with a one-paragraph TL;DR.
   // Opt-in (CLI --tldr); default off keeps output identical to v0.13.
   tldr?: boolean;
+  // v0.15.0 — recency filter. When set, a fetched web source whose extracted
+  // publication date is older than this epoch-ms cutoff is dropped (emits a
+  // `stale` skip). Sources with no extractable date are kept (not penalized
+  // for missing metadata). Does not apply to include[]/preKept sources.
+  sinceMs?: number;
   onEvent?: (event: AgentEvent) => void;
   // Fires for each SSE token emitted by the synthesizer. When set, the agent
   // uses the streaming LLM path for synthesize() calls. CLI callers enable
@@ -137,7 +142,8 @@ export type AgentEvent =
         | "pdf-no-extractor"
         | "pdf-extract-error"
         | "domain-deny"
-        | "domain-not-allowed";
+        | "domain-not-allowed"
+        | "stale";
     }
   | { type: "include.done"; ingested: number; skipped: number }
   | { type: "synthesize.start"; sourceCount: number; round: number }
@@ -442,6 +448,21 @@ export async function runAgent(
         // HTML (JSON-LD / meta / <time>). PDFs and cache hits without html
         // simply yield undefined — additive, never blocks keeping the source.
         const publishedAt = isPdf ? undefined : extractPublishedDate(f.page.html);
+
+        // Recency filter (--since): drop a source dated before the cutoff.
+        // Dateless sources pass (we don't penalize missing metadata).
+        if (
+          config.sinceMs !== undefined &&
+          publishedAt !== undefined &&
+          publishedAt < config.sinceMs
+        ) {
+          emit(config, {
+            type: "fetch.skipped",
+            url: f.page.finalUrl || f.page.url,
+            reason: "stale",
+          });
+          continue;
+        }
 
         keptSources.push({
           id: keptSources.length + 1,

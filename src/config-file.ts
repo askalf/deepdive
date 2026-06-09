@@ -67,6 +67,7 @@ const KEY_MAP: Record<string, { env: string; kind: Kind }> = {
   sessionsDir: { env: "DEEPDIVE_SESSIONS_DIR", kind: "string" },
   allowDomain: { env: "DEEPDIVE_ALLOW_DOMAIN", kind: "list" },
   denyDomain: { env: "DEEPDIVE_DENY_DOMAIN", kind: "list" },
+  since: { env: "DEEPDIVE_SINCE", kind: "string" },
   include: { env: "DEEPDIVE_INCLUDE", kind: "list" },
   tldr: { env: "DEEPDIVE_TLDR", kind: "bool" },
   strictCites: { env: "DEEPDIVE_STRICT_CITES", kind: "bool" },
