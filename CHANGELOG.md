@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-06-09
+
 ### Added — session tags
 
 - **`--tag=<name>[,<name>]`** (env `DEEPDIVE_TAGS`, config-file key `tags`) — label a run's saved session. Tags are normalized (trimmed, lowercased, `#`-stripped, deduped) and stored as an additive optional `tags` field on the record (older sessions load unchanged).
