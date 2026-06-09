@@ -424,6 +424,9 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 | Wikipedia | `--search=wikipedia` | nothing | Encyclopedia-first. Best for definitional / factual sub-queries. Language via `DEEPDIVE_WIKIPEDIA_LANG` (default `en`). |
 | arXiv | `--search=arxiv` | nothing | Research-paper / preprint search via the arXiv API. Kept sources are abstract pages; the PDF path handles linked PDFs. |
 | GitHub | `--search=github` | `DEEPDIVE_GITHUB_TOKEN` (optional) | Repository search — "what project does X". Works keyless at 60 req/hr; the token raises the limit. |
+| Hacker News | `--search=hackernews` | nothing | Algolia-hosted HN search. Community discussion, release threads, primary sources. Snippet shows points/comments. |
+| Stack Exchange | `--search=stackexchange` | nothing | Q&A search (default `stackoverflow`; `DEEPDIVE_STACKEXCHANGE_SITE` for serverfault/superuser/etc). Keyless (throttled). |
+| PubMed | `--search=pubmed` | nothing | Biomedical literature via NCBI E-utilities. Kept sources are abstract pages; snippet shows authors/journal/date. |
 
 Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts`, register in `src/search.ts`. The full contract + a copy-paste scaffold live in [docs/search-adapter.md](docs/search-adapter.md).
 

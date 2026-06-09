@@ -76,6 +76,23 @@ export async function resolveSearchAdapter(
       const { GitHubSearch } = await import("./search/github.js");
       return new GitHubSearch(env.DEEPDIVE_GITHUB_TOKEN);
     }
+    case "hackernews":
+    case "hn": {
+      const { HackerNewsSearch } = await import("./search/hackernews.js");
+      return new HackerNewsSearch();
+    }
+    case "stackexchange":
+    case "stackoverflow":
+    case "so": {
+      const { StackExchangeSearch } = await import("./search/stackexchange.js");
+      // Default site stackoverflow; override with DEEPDIVE_STACKEXCHANGE_SITE.
+      const site = (env.DEEPDIVE_STACKEXCHANGE_SITE ?? "stackoverflow").trim() || "stackoverflow";
+      return new StackExchangeSearch(site);
+    }
+    case "pubmed": {
+      const { PubMedSearch } = await import("./search/pubmed.js");
+      return new PubMedSearch();
+    }
     case "auto": {
       // DDG primary, Brave fallback. Brave is optional — if no key is set,
       // `auto` degrades to DDG-only (the pre-auto default behavior) rather
