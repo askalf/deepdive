@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — two scholarly search adapters (Semantic Scholar, OpenAlex)
+
+- **`--search=semanticscholar`** (alias `s2`, `src/search/semanticscholar.ts`) — academic paper search via the S2 Graph API. Keyless works but is heavily rate-limited (frequent 429s); `DEEPDIVE_S2_KEY` makes it reliable. Snippet shows citations/year/authors.
+- **`--search=openalex`** (`src/search/openalex.ts`) — ~250M scholarly works across all disciplines, keyless. `DEEPDIVE_OPENALEX_MAILTO` joins the faster polite pool. URL prefers the open landing page, falling back to the DOI.
+
+Both keep their transform in an exported pure mapper and reuse `searchTimeoutSignal`. OpenAlex verified live; deepdive now ships **14 search adapters**.
+
 ### Added — `stats` + `sessions ls` filter
 
 - **`deepdive stats [--json]`** (`src/stats.ts`) — aggregate insights across all saved sessions: run count, total calculated cost, sources fetched + avg/session, total rounds + deep-run count, a per-model breakdown (runs + cost), and the date span. New pure `aggregateSessionStats` / `renderStats` (exported) and a `loadAllSessions` reader.

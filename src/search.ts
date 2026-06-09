@@ -93,6 +93,15 @@ export async function resolveSearchAdapter(
       const { PubMedSearch } = await import("./search/pubmed.js");
       return new PubMedSearch();
     }
+    case "semanticscholar":
+    case "s2": {
+      const { SemanticScholarSearch } = await import("./search/semanticscholar.js");
+      return new SemanticScholarSearch(env.DEEPDIVE_S2_KEY);
+    }
+    case "openalex": {
+      const { OpenAlexSearch } = await import("./search/openalex.js");
+      return new OpenAlexSearch(env.DEEPDIVE_OPENALEX_MAILTO);
+    }
     case "auto": {
       // DDG primary, Brave fallback. Brave is optional — if no key is set,
       // `auto` degrades to DDG-only (the pre-auto default behavior) rather

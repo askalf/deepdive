@@ -427,6 +427,8 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 | Hacker News | `--search=hackernews` | nothing | Algolia-hosted HN search. Community discussion, release threads, primary sources. Snippet shows points/comments. |
 | Stack Exchange | `--search=stackexchange` | nothing | Q&A search (default `stackoverflow`; `DEEPDIVE_STACKEXCHANGE_SITE` for serverfault/superuser/etc). Keyless (throttled). |
 | PubMed | `--search=pubmed` | nothing | Biomedical literature via NCBI E-utilities. Kept sources are abstract pages; snippet shows authors/journal/date. |
+| Semantic Scholar | `--search=semanticscholar` (`s2`) | `DEEPDIVE_S2_KEY` (recommended) | Academic paper search. Keyless works but is heavily rate-limited (frequent 429s); a free API key makes it reliable. Snippet shows citations/year/authors. |
+| OpenAlex | `--search=openalex` | nothing | ~250M scholarly works, all disciplines. Keyless; set `DEEPDIVE_OPENALEX_MAILTO` to join the faster "polite pool". Sources are landing pages / DOIs. |
 
 Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts`, register in `src/search.ts`. The full contract + a copy-paste scaffold live in [docs/search-adapter.md](docs/search-adapter.md).
 
