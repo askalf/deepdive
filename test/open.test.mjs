@@ -9,11 +9,11 @@ test("browserOpenCommand: macOS uses open", () => {
   });
 });
 
-test("browserOpenCommand: Windows uses cmd /c start with empty title arg", () => {
+test("browserOpenCommand: Windows uses explorer directly (no shell)", () => {
   const c = browserOpenCommand("win32", "C:\\Temp\\r with space.html");
-  assert.equal(c.cmd, "cmd");
-  // The empty "" title arg guards a spaced path from being read as the title.
-  assert.deepEqual(c.args, ["/c", "start", "", "C:\\Temp\\r with space.html"]);
+  assert.equal(c.cmd, "explorer.exe");
+  // Single argv entry, no cmd.exe — the path can't be interpreted as a command.
+  assert.deepEqual(c.args, ["C:\\Temp\\r with space.html"]);
 });
 
 test("browserOpenCommand: Linux/other uses xdg-open", () => {
