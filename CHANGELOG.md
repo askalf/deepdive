@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — config file, named profiles, shell completion
+
+- **`~/.deepdive/config.json`** (override path with `DEEPDIVE_CONFIG`) — persist defaults so you stop retyping `--base-url` / `--model` / `--search`. Friendly keys mirror the flags (`model`, `search`, `deep`, `denyDomain`, `tldr`, … and `"cache": false`-style toggles), plus an optional `profiles` map and `defaultProfile`. Implemented by translating the file to the `DEEPDIVE_*` env strings `resolveConfig` already reads and layering them *under* the real environment — so `resolveConfig` is untouched and precedence is **CLI flags > env vars > profile > config-file base > defaults**.
+- **`--profile=<name>`** — named setting bundles. Built-ins: `deep`, `thorough`, `fast`, `cheap`, `strict`. A config-file profile of the same name overrides the built-in; `defaultProfile` applies one every run. Unknown names error with the available list.
+- **`deepdive completion <bash|zsh|fish>`** — print a shell completion script (`source <(deepdive completion bash)`), completing subcommands + common flags.
+
+New modules `src/config-file.ts`, `src/profiles.ts`, `src/completion.ts`; new library exports `loadConfigFile`, `fileConfigToEnv`, `BUILTIN_PROFILES`, `resolveProfile`, `listProfiles`, `completionScript`. 20 new tests; precedence chain verified end-to-end.
+
 ### Added — answer quality: published dates, recency-aware synthesis, confidence, TL;DR
 
 - **Published-date extraction** (`src/dates.ts`) — recover a page's publication date from its rendered HTML (JSON-LD `datePublished` → publication `<meta>` tags → `<time datetime>` → modified-date fallbacks), range-validated to reject parse noise. Surfaced on the source row (`fetched … · published …`), in the HTML export, and in `--json` as `publishedAt`. Sources without a date degrade silently.

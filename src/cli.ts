@@ -40,6 +40,9 @@ import {
 } from "./sessions.js";
 import { renderHtmlReport } from "./html-export.js";
 import { assessConfidence, formatConfidenceLine } from "./confidence.js";
+import { loadConfigFile, fileConfigToEnv } from "./config-file.js";
+import { resolveProfile } from "./profiles.js";
+import { completionScript, type Shell } from "./completion.js";
 import {
   diffSessions,
   renderDiffText,
@@ -74,6 +77,7 @@ Usage:
   deepdive sessions rm <id> [<id>...]      Delete one or more saved sessions
   deepdive sessions prune --older-than=30d Delete old sessions (and/or --keep=<n> newest;
                                            --dry-run to preview)
+  deepdive completion <bash|zsh|fish>      Print a shell completion script
   deepdive --help                          Show this help
 
 Flags:
@@ -109,6 +113,9 @@ Flags:
   --deep[=<n>]                  Iterative research: run N additional critic-driven
                                 rounds after the first synthesis. Default when
                                 bare: 2. No deep pass when flag absent.
+  --profile=<name>              Apply a named preset: deep | thorough | fast | cheap |
+                                strict, or one defined in your config file. Layered
+                                beneath env + flags. See ~/.deepdive/config.json.
   --concurrency=<n>             Parallel fetches. Default: 4
   --no-cache                    Disable the on-disk page cache (default: enabled)
   --cache-ttl-ms=<ms>           Page cache TTL. Default: 3600000 (1 hour)
@@ -157,7 +164,13 @@ Environment:
   DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK,
   DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES,
   DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_API_FORMAT,
-  DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR
+  DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR, DEEPDIVE_CONFIG
+
+Config file:
+  ~/.deepdive/config.json (override path with DEEPDIVE_CONFIG) — JSON object of
+  default settings (friendly keys: model, search, deep, concurrency, …), an
+  optional "profiles" map, and an optional "defaultProfile". Precedence:
+  CLI flags > env vars > --profile > config-file base > built-in defaults.
 `;
 
 interface ParsedArgs {
@@ -184,6 +197,7 @@ const SUBCOMMAND_VERBS = new Set([
   "continue",
   "export",
   "diff",
+  "completion",
 ]);
 
 // Exported for unit tests.
@@ -355,6 +369,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "out":
           outPath = value;
+          break;
+        case "profile":
+          flags.profile = value;
           break;
         case "format":
           flags.format = value.toLowerCase();
@@ -553,6 +570,17 @@ async function main(argv: string[]): Promise<number> {
     process.stdout.write(USAGE);
     return 0;
   }
+  // `completion` needs no config; everything else gets config-file + profile
+  // defaults layered beneath env (real env wins). Do this before any
+  // resolveConfig so all subcommands see the same effective settings.
+  if (parsed.question === "completion") {
+    return completionCommand(parsed);
+  }
+  const cfgErr = applyConfigToEnv(parsed.flags);
+  if (cfgErr) {
+    process.stderr.write(`deepdive: ${cfgErr}\n`);
+    return 2;
+  }
   if (parsed.question === "doctor") {
     const config = resolveConfig(parsed.flags, process.env);
     const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -588,6 +616,48 @@ async function main(argv: string[]): Promise<number> {
 
   const config = resolveConfig(parsed.flags, process.env);
   return await runResearch({ question: parsed.question, parsed, config });
+}
+
+// Layer config-file base + selected-profile settings into process.env, filling
+// only keys the real environment hasn't already set — so the effective
+// precedence is: CLI flags > env vars > profile > config-file base > defaults.
+// Returns an error string for a fatal problem (unknown profile); a malformed
+// config file is a non-fatal warning. Mutating process.env keeps every
+// downstream resolveConfig(flags, process.env) call config-aware with no
+// plumbing changes.
+function applyConfigToEnv(flags: CLIFlags): string | undefined {
+  const loaded = loadConfigFile(process.env);
+  if (loaded.error) {
+    process.stderr.write(`deepdive: warning: ${loaded.error}; ignoring config file\n`);
+  }
+  const profileName = flags.profile ?? loaded.defaultProfile;
+  let profileEnv: Record<string, string> = {};
+  if (profileName) {
+    try {
+      profileEnv = fileConfigToEnv(resolveProfile(profileName, loaded.profiles));
+    } catch (err) {
+      return safeErrorMessage(err);
+    }
+  }
+  // Profile wins over the file base within the file layer.
+  const fileEnv = { ...fileConfigToEnv(loaded.base), ...profileEnv };
+  for (const [k, v] of Object.entries(fileEnv)) {
+    if (process.env[k] === undefined) process.env[k] = v;
+  }
+  return undefined;
+}
+
+function completionCommand(parsed: ParsedArgs): number {
+  const shell = parsed.extras[0];
+  if (shell !== "bash" && shell !== "zsh" && shell !== "fish") {
+    process.stderr.write(
+      `deepdive: completion requires a shell: bash | zsh | fish\n` +
+        `  e.g. source <(deepdive completion bash)\n`,
+    );
+    return 2;
+  }
+  process.stdout.write(completionScript(shell as Shell));
+  return 0;
 }
 
 // v0.12.0 — the shared research path used by both the default

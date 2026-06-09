@@ -356,6 +356,53 @@ Every flag mirrors a `DEEPDIVE_*` env var. CLI flags win over env.
 
 ---
 
+## Config file and profiles
+
+If you keep passing the same flags, persist them. `~/.deepdive/config.json` (override the path with `DEEPDIVE_CONFIG`) is a JSON object of friendly-named defaults, an optional `profiles` map, and an optional `defaultProfile`:
+
+```json
+{
+  "baseUrl": "http://localhost:3456",
+  "model": "claude-sonnet-4-6",
+  "search": "auto",
+  "braveKey": "...",
+  "denyDomain": ["pinterest.com", "quora.com"],
+  "defaultProfile": "deep",
+  "profiles": {
+    "deep":  { "deep": 3, "maxSources": 16 },
+    "audit": { "model": "claude-opus-4-7", "deep": 4, "strictCites": true, "search": "brave" }
+  }
+}
+```
+
+Friendly keys mirror the flags (`model`, `search`, `deep`, `concurrency`, `maxSources`, `tldr`, `strictCites`, …; disable a default-on feature with `"cache": false` / `"verifyCites": false`). Run `deepdive` and these apply automatically.
+
+**Profiles** are named bundles you select with `--profile=<name>`:
+
+```bash
+deepdive "..." --profile=deep      # built-in: 3 critic rounds
+deepdive "..." --profile=audit     # your config-file profile
+```
+
+Built-ins: `deep` (3 rounds), `thorough` (4 rounds + 20 sources + strict cites), `fast` (high concurrency, single-pass), `cheap` (haiku for plan/critic, sonnet for synth), `strict` (fail on weak citations). A config-file profile of the same name overrides a built-in.
+
+**Precedence**, lowest to highest: built-in defaults → config-file base → selected profile → environment variables → CLI flags. So a profile sets a baseline you can still override per-run with an env var or a flag; a config file never silently wins over something you typed.
+
+## Shell completion
+
+```bash
+# bash — add to ~/.bashrc
+source <(deepdive completion bash)
+# zsh — add to ~/.zshrc
+source <(deepdive completion zsh)
+# fish
+deepdive completion fish > ~/.config/fish/completions/deepdive.fish
+```
+
+Completes subcommands (`export`, `diff`, `sessions`, …) and the common flags.
+
+---
+
 ## Search adapters
 
 One adapter per backend. Default (DuckDuckGo) needs no key.

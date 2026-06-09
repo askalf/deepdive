@@ -56,6 +56,16 @@ export {
 export { callLLMStream, parseBlocks, parseSSE, type StreamOptions } from "./llm-stream.js";
 export { retry, backoffDelay, type RetryOptions } from "./retry.js";
 export { resolveConfig, type RuntimeConfig, type CLIFlags } from "./config.js";
+export {
+  loadConfigFile,
+  fileConfigToEnv,
+  knownConfigKeys,
+  defaultConfigPath,
+  type FileConfig,
+  type ParsedConfigFile,
+} from "./config-file.js";
+export { BUILTIN_PROFILES, resolveProfile, listProfiles } from "./profiles.js";
+export { completionScript, type Shell } from "./completion.js";
 export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";
 export { runConcurrent } from "./concurrency.js";
 export {
