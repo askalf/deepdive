@@ -112,5 +112,9 @@ function fish(): string {
 }
 
 function escapeFish(s: string): string {
-  return s.replace(/'/g, "\\'");
+  // Escape the backslash first, then the single quote — escaping only the
+  // quote would leave a trailing backslash able to break out of the '…'
+  // string (CodeQL js/incomplete-sanitization). Inputs here are static, but
+  // keep the escaper correct.
+  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
