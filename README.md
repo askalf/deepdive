@@ -349,8 +349,11 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 | Tavily | `--search=tavily` | `DEEPDIVE_TAVILY_KEY` | Research-tuned. Returns pre-extracted content; deepdive re-fetches anyway for consistency. |
 | Exa | `--search=exa` | `DEEPDIVE_EXA_KEY` | Neural search tuned for long, intent-rich queries — a fit for the kind of sub-queries the planner and critic loop generate. Highlights only; deepdive re-fetches the page for full content. |
 | Auto | `--search=auto` | `DEEPDIVE_BRAVE_KEY` (optional) | DDG primary, Brave fallback on DDG failure or empty results. Degrades to DDG-only when no Brave key is set. |
+| Wikipedia | `--search=wikipedia` | nothing | Encyclopedia-first. Best for definitional / factual sub-queries. Language via `DEEPDIVE_WIKIPEDIA_LANG` (default `en`). |
+| arXiv | `--search=arxiv` | nothing | Research-paper / preprint search via the arXiv API. Kept sources are abstract pages; the PDF path handles linked PDFs. |
+| GitHub | `--search=github` | `DEEPDIVE_GITHUB_TOKEN` (optional) | Repository search — "what project does X". Works keyless at 60 req/hr; the token raises the limit. |
 
-Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts`, register in `src/search.ts`.
+Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts`, register in `src/search.ts`. The full contract + a copy-paste scaffold live in [docs/search-adapter.md](docs/search-adapter.md).
 
 ---
 

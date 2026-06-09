@@ -60,6 +60,22 @@ export async function resolveSearchAdapter(
       if (!key) throw new Error("exa adapter requires DEEPDIVE_EXA_KEY");
       return new ExaSearch(key);
     }
+    case "wikipedia":
+    case "wiki": {
+      const { WikipediaSearch } = await import("./search/wikipedia.js");
+      const lang = (env.DEEPDIVE_WIKIPEDIA_LANG ?? "en").trim() || "en";
+      return new WikipediaSearch(lang);
+    }
+    case "arxiv": {
+      const { ArxivSearch } = await import("./search/arxiv.js");
+      return new ArxivSearch();
+    }
+    case "github": {
+      // Token is optional — unauthenticated search works at a lower rate
+      // limit. DEEPDIVE_GITHUB_TOKEN raises it.
+      const { GitHubSearch } = await import("./search/github.js");
+      return new GitHubSearch(env.DEEPDIVE_GITHUB_TOKEN);
+    }
     case "auto": {
       // DDG primary, Brave fallback. Brave is optional — if no key is set,
       // `auto` degrades to DDG-only (the pre-auto default behavior) rather

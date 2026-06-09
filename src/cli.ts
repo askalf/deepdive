@@ -88,11 +88,13 @@ Flags:
                                 dollar cap. e.g. --max-cost=$0.50 or --max-cost=5.
                                 Env: DEEPDIVE_MAX_COST. Exit code 2 on cap-hit.
   --max-tokens=<n>              Output max tokens per LLM call. Default: 4096
-  --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa | auto
-                                Default: duckduckgo (no key required). 'auto' runs
-                                DDG first and falls back to Brave (if
-                                DEEPDIVE_BRAVE_KEY is set) when DDG fails or
-                                returns no results.
+  --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa |
+                                auto | wikipedia | arxiv | github
+                                Default: duckduckgo (no key required). wikipedia and arxiv
+                                need no key; github works keyless (set DEEPDIVE_GITHUB_TOKEN
+                                for a higher rate limit). 'auto' runs DDG first and falls
+                                back to Brave (if DEEPDIVE_BRAVE_KEY is set) on failure or
+                                empty results.
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
@@ -144,6 +146,7 @@ Flags:
 Environment:
   DEEPDIVE_BASE_URL, DEEPDIVE_API_KEY, DEEPDIVE_MODEL, DEEPDIVE_SEARCH,
   DEEPDIVE_SEARXNG_URL, DEEPDIVE_BRAVE_KEY, DEEPDIVE_TAVILY_KEY, DEEPDIVE_EXA_KEY,
+  DEEPDIVE_WIKIPEDIA_LANG, DEEPDIVE_GITHUB_TOKEN,
   DEEPDIVE_MAX_SOURCES, DEEPDIVE_FETCH_TIMEOUT_MS, DEEPDIVE_HEADED,
   DEEPDIVE_DEEP_ROUNDS, DEEPDIVE_CONCURRENCY, DEEPDIVE_NO_CACHE,
   DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE,
