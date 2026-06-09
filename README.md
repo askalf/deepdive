@@ -502,8 +502,11 @@ session  2026-05-07_134509_5959f102  (deepdive resume 2026-05-07_134509_5959f102
 Four subcommands operate on saved sessions:
 
 ```bash
-deepdive sessions ls [<filter>]               # newest first; optional case-insensitive question filter
+deepdive sessions ls [<filter>]               # newest first; optional question filter; --tag=<t> filters by tag
+deepdive sessions tag <id> client-x,audit     # retro-label a session (tags also settable at run time: --tag)
+deepdive sessions untag <id> audit            # remove labels
 deepdive stats                                # totals: cost, sources, rounds, per-model breakdown, date span
+deepdive stats --tag=client-x                 # same, scoped to one tag — e.g. per-client research spend
 deepdive sessions rm <id> [<id>...]           # delete one or more sessions
 deepdive sessions prune --older-than=30d      # delete old sessions (and/or --keep=N; --dry-run to preview)
 deepdive show <id>                            # re-print the original markdown answer
@@ -518,6 +521,8 @@ deepdive diff <id-a> <id-b>                   # how the answer + sources changed
 `continue` (v0.12.0) is the deepening path: it runs the *full* agent loop — plan, search, fetch — with the parent session's sources seeded into the pool. URLs already in the parent are deduped against the new search results so you never re-fetch what you already paid for. The new run is saved as a fresh session with `parentId` set to the parent. Use this when the original got close and you want the planner to expand the corpus with a tighter question.
 
 IDs are timestamp-prefixed (`YYYY-MM-DD_HHMMSS_<8-hex>`), so they sort chronologically and you can pass a unique prefix instead of typing the full id (`deepdive resume 2026-05-07_134509`).
+
+**Tags** organize the corpus. Label a run as you make it (`deepdive "..." --tag=client-x,audit`, or `DEEPDIVE_TAGS` / a config-file `tags` default), or after the fact with `sessions tag`. Tags are normalized lowercase, render as `#client-x` in listings, and scope both `sessions ls --tag=<t>` and `stats --tag=<t>` — so "what has research for client X cost this month" is one command. The `--tag` *filter* only ever comes from the explicit flag; a config-file default tag labels new runs but never silently hides sessions from listings.
 
 `prune` keeps your local corpus from growing unbounded. `--older-than` takes a duration (`30d`, `12h`, `90m`, `2w`, or a bare integer = days); `--keep=N` always retains the newest N regardless of age; pass both and a session is removed only when it's past the keep-newest set *and* older than the cutoff. `--dry-run` prints exactly what would go without deleting anything. With neither flag, `prune` refuses to run — it will never wipe your history by default.
 
