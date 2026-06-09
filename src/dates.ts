@@ -26,8 +26,19 @@ export function extractPublishedDate(
     if (hit) candidates.push(hit);
   }
 
-  const timeEl = /<time\b[^>]*\bdatetime\s*=\s*["']([^"']+)["']/i.exec(html);
-  if (timeEl) candidates.push(timeEl[1]);
+  // First <time> element that carries a datetime attribute. Match the open
+  // tag with a single [^>]* (linear), then read the attr from the bounded
+  // attribute string — avoids the polynomial `[^>]*LITERAL[^>]*` backtracking
+  // shape on adversarial page HTML.
+  const timeRe = /<time\b([^>]*)>/gi;
+  let tm: RegExpExecArray | null;
+  while ((tm = timeRe.exec(html)) !== null) {
+    const dt = attr(tm[1], "datetime");
+    if (dt) {
+      candidates.push(dt);
+      break;
+    }
+  }
 
   if (ld.modified) candidates.push(ld.modified);
   for (const key of MODIFIED_META_KEYS) {
@@ -93,14 +104,18 @@ function attr(attrs: string, name: string): string | undefined {
 // Exported for unit tests. Pulls datePublished / dateModified out of any
 // JSON-LD <script> block, walking arrays and @graph. Malformed JSON is skipped.
 export function jsonLdDates(html: string): { published?: string; modified?: string } {
-  const re =
-    /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  // Match every <script>…</script> with a single linear [^>]* for the open
+  // tag, then test the bounded attribute string for the ld+json type — this
+  // avoids the polynomial-backtracking `[^>]*type=…[^>]*>` shape that ReDoS on
+  // adversarial page HTML.
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
   let m: RegExpExecArray | null;
   const result: { published?: string; modified?: string } = {};
   while ((m = re.exec(html)) !== null) {
+    if (!/type\s*=\s*["']application\/ld\+json["']/i.test(m[1])) continue;
     let data: unknown;
     try {
-      data = JSON.parse(m[1].trim());
+      data = JSON.parse(m[2].trim());
     } catch {
       continue;
     }
