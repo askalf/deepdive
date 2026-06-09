@@ -154,6 +154,38 @@ export async function listSessions(
   return { sessions, bad };
 }
 
+// Loads every parseable session record (full content, not just metadata) for
+// aggregate analysis (`deepdive stats`). Unparseable files are collected in
+// `bad` and skipped. Newest first.
+export async function loadAllSessions(
+  opts: SessionStorageOptions,
+): Promise<{ records: SessionRecord[]; bad: string[] }> {
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(opts.dir);
+  } catch {
+    return { records: [], bad: [] };
+  }
+  const records: SessionRecord[] = [];
+  const bad: string[] = [];
+  for (const f of entries) {
+    if (!f.endsWith(".json") || f.endsWith(".tmp")) continue;
+    try {
+      const raw = await fs.readFile(join(opts.dir, f), "utf-8");
+      const r = JSON.parse(raw) as SessionRecord;
+      if (r.schema !== 1) {
+        bad.push(f);
+        continue;
+      }
+      records.push(r);
+    } catch {
+      bad.push(f);
+    }
+  }
+  records.sort((a, b) => b.createdAt - a.createdAt);
+  return { records, bad };
+}
+
 // Resolves a partial id (timestamp-prefix shorthand) against the
 // directory. Exported for tests and reuse from the resume path.
 //
