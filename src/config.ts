@@ -90,6 +90,9 @@ export interface CLIFlags {
   // Subcommand-scoped flags. These don't affect a research run, so
   // resolveConfig ignores them — they're read directly by the export / diff /
   // sessions-prune handlers off ParsedArgs.flags.
+  // Named settings preset (built-in or config-file-defined). Applied as
+  // defaults beneath env + flags; read in cli.ts, not resolveConfig.
+  profile?: string;
   format?: string; // `deepdive export` output format: html | md
   narrate?: boolean; // `deepdive diff --narrate`: LLM summary of the change
   dryRun?: boolean; // `deepdive sessions prune --dry-run`: report, don't delete
