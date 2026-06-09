@@ -430,6 +430,13 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 
 Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts`, register in `src/search.ts`. The full contract + a copy-paste scaffold live in [docs/search-adapter.md](docs/search-adapter.md).
 
+To preview what a backend returns (no LLM, no fetch), use the `search` subcommand:
+
+```bash
+deepdive search "rust async runtime" --search=hackernews
+deepdive search "nginx 502" --search=stackexchange --json
+```
+
 ---
 
 ## `deepdive doctor`
@@ -524,6 +531,8 @@ deepdive export 2026-05-07 --format=md                   # re-render the origina
 ```
 
 The markdown→HTML rendering is hand-rolled (`src/markdown.ts`) so the export adds **no runtime dependency** — same audit-it-in-an-afternoon guarantee as the rest of the tool. The HTML is produced from the saved session, so you can export a run you did weeks ago without re-spending a token.
+
+To render *and* open it in one step, `deepdive open <id>` writes the HTML to a temp file (or `--out=<path>`) and launches your default browser — the file path is always printed, so it works on a headless box too.
 
 ---
 

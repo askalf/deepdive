@@ -67,6 +67,7 @@ export {
 } from "./config-file.js";
 export { BUILTIN_PROFILES, resolveProfile, listProfiles } from "./profiles.js";
 export { completionScript, type Shell } from "./completion.js";
+export { browserOpenCommand, type OpenCommand } from "./open.js";
 export { createCache, cacheKey, type PageCache, type CacheOptions } from "./cache.js";
 export { runConcurrent } from "./concurrency.js";
 export {

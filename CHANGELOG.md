@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — `search` and `open` convenience commands
+
+- **`deepdive search "<query>"`** — run just the configured search adapter and print the raw candidate list (no LLM, no fetch, no browser). Honors `--search` and `--json`; `--results-per-query` sets the count (default 10). A cheap way to preview a backend or debug an adapter.
+- **`deepdive open <id>`** — render a saved session to a self-contained HTML file (temp dir, or `--out=<path>`) and open it in the default browser. The file path is always printed, so it works on a headless box. Cross-platform opener (`open`/`xdg-open`/`start`) selected by a pure, tested `browserOpenCommand`; the target is passed as a single argv entry (no shell).
+
 ### Added — three more keyless research adapters
 
 - **`--search=hackernews`** (alias `hn`, `src/search/hackernews.ts`) — Algolia-hosted HN search, no key. Community discussion / release threads; Ask/Show HN posts fall back to the HN thread URL. Snippet shows points/comments.
