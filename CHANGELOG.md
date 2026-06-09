@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — three more keyless research adapters
+
+- **`--search=hackernews`** (alias `hn`, `src/search/hackernews.ts`) — Algolia-hosted HN search, no key. Community discussion / release threads; Ask/Show HN posts fall back to the HN thread URL. Snippet shows points/comments.
+- **`--search=stackexchange`** (aliases `stackoverflow`/`so`, `src/search/stackexchange.ts`) — Q&A search, no key (throttled). Default site `stackoverflow`; `DEEPDIVE_STACKEXCHANGE_SITE` selects another (serverfault, superuser, …). Entity-decoded titles; snippet shows score/answers/accepted.
+- **`--search=pubmed`** (`src/search/pubmed.ts`) — biomedical literature via NCBI E-utilities (esearch → esummary), no key. Kept sources are abstract pages; snippet shows authors/journal/date.
+
+All three reuse `searchTimeoutSignal`, keep their transform in an exported pure mapper, and were verified against the live APIs. deepdive now ships 12 search adapters.
+
 ### Added — `--since` recency filter
 
 - **`--since=<date|duration>`** (env `DEEPDIVE_SINCE`) — drop fetched sources published before a cutoff, building on v0.14's published-date extraction. Accepts an absolute date (`2024`, `2024-06`, `2024-06-15`) or a relative duration meaning "that long ago" (`30d`, `12h`, `2w`). A web source whose detected publication date precedes the cutoff is skipped (new `stale` `fetch.skipped` reason); sources with no detectable date are kept (no penalty for missing metadata). Doesn't apply to `--include` / `continue` sources. New pure `resolveSince` (exported); persistable as `since` in the config file. A supplied-but-unparseable `--since` is a hard error (exit 2), not a silent no-op.
