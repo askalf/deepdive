@@ -34,6 +34,11 @@ import {
 } from "./pdf.js";
 import { ingestLocalPaths } from "./local.js";
 import { extractPublishedDate } from "./dates.js";
+import {
+  contentShingles,
+  findNearDuplicate,
+  DEFAULT_NEAR_DUPE_THRESHOLD,
+} from "./similarity.js";
 import { classifyUrl, type DomainFilter } from "./domain-filter.js";
 import type { PageCache } from "./cache.js";
 import { runConcurrent } from "./concurrency.js";
@@ -111,6 +116,14 @@ export interface AgentConfig {
   // `stale` skip). Sources with no extractable date are kept (not penalized
   // for missing metadata). Does not apply to include[]/preKept sources.
   sinceMs?: number;
+  // v0.17.0 — near-duplicate dedup. A fetched source whose extracted content
+  // is ≥ `nearDupeThreshold` Jaccard-similar (word 5-gram shingles) to an
+  // already-kept source is dropped with a `near-duplicate` skip — catches the
+  // same article syndicated across hosts, which URL dedupe can't. Default ON
+  // (the conservative 0.9 threshold only fires on genuine copies); disable
+  // with dedupeNearDupes: false (CLI --no-dedupe).
+  dedupeNearDupes?: boolean;
+  nearDupeThreshold?: number;
   onEvent?: (event: AgentEvent) => void;
   // Fires for each SSE token emitted by the synthesizer. When set, the agent
   // uses the streaming LLM path for synthesize() calls. CLI callers enable
@@ -143,7 +156,8 @@ export type AgentEvent =
         | "pdf-extract-error"
         | "domain-deny"
         | "domain-not-allowed"
-        | "stale";
+        | "stale"
+        | "near-duplicate";
     }
   | { type: "include.done"; ingested: number; skipped: number }
   | { type: "synthesize.start"; sourceCount: number; round: number }
@@ -274,6 +288,10 @@ export async function runAgent(
   const allCandidates: Candidate[] = [];
   const allQueries: string[] = [];
   const keptSources: SourceWithContent[] = [];
+  // Shingle sets for near-dup detection, lazily synced to keptSources so
+  // include[]/preKept entries (pushed below without touching this array)
+  // still participate as dedupe anchors.
+  const keptShingles: Set<string>[] = [];
   const rounds: RoundTrace[] = [];
 
   // Local file ingestion: pre-fetched sources are placed at the head of
@@ -462,6 +480,29 @@ export async function runAgent(
             reason: "stale",
           });
           continue;
+        }
+
+        // Near-duplicate dedup: drop a source whose content is shingle-
+        // similar to one already kept (syndicated copy on another host).
+        if (config.dedupeNearDupes !== false) {
+          while (keptShingles.length < keptSources.length) {
+            keptShingles.push(contentShingles(keptSources[keptShingles.length].content));
+          }
+          const candidateShingles = contentShingles(content);
+          const dupOf = findNearDuplicate(
+            candidateShingles,
+            keptShingles,
+            config.nearDupeThreshold ?? DEFAULT_NEAR_DUPE_THRESHOLD,
+          );
+          if (dupOf !== -1) {
+            emit(config, {
+              type: "fetch.skipped",
+              url: f.page.finalUrl || f.page.url,
+              reason: "near-duplicate",
+            });
+            continue;
+          }
+          keptShingles.push(candidateShingles);
         }
 
         keptSources.push({

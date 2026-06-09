@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — near-duplicate source dedup
+
+- **Near-duplicate detection** (`src/similarity.ts`) — a fetched source whose extracted content is ≥ 90% shingle-similar (word 5-gram Jaccard) to an already-kept source is dropped with a new `near-duplicate` `fetch.skipped` reason. Catches the same article syndicated across hosts (wire copies, mirrors, AMP), which URL-level dedupe can't. **Default on** — the conservative 0.9 threshold only fires on genuine copies (different articles on the same topic typically score < 0.3). Tune with `--dedupe-threshold=<0..1>` (`DEEPDIVE_DEDUPE_THRESHOLD`); disable with `--no-dedupe` (`DEEPDIVE_NO_DEDUPE=1`). Config-file keys: `dedupe` (boolean), `dedupeThreshold`. `--include` / `continue` sources are never dropped — they act as dedupe anchors so a re-search can't re-add a copy of what you already have. New pure exports: `contentShingles`, `jaccard`, `findNearDuplicate`, `DEFAULT_NEAR_DUPE_THRESHOLD`.
+
 ## [0.16.0] - 2026-06-09
 
 ### Added — two scholarly search adapters (Semantic Scholar, OpenAlex)
