@@ -431,6 +431,14 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 | PubMed | `--search=pubmed` | nothing | Biomedical literature via NCBI E-utilities. Kept sources are abstract pages; snippet shows authors/journal/date. |
 | Semantic Scholar | `--search=semanticscholar` (`s2`) | `DEEPDIVE_S2_KEY` (recommended) | Academic paper search. Keyless works but is heavily rate-limited (frequent 429s); a free API key makes it reliable. Snippet shows citations/year/authors. |
 | OpenAlex | `--search=openalex` | nothing | ~250M scholarly works, all disciplines. Keyless; set `DEEPDIVE_OPENALEX_MAILTO` to join the faster "polite pool". Sources are landing pages / DOIs. |
+| Multi | `--search=multi:<a>,<b>[,...]` | whatever the parts need | Fan-out: queries every listed adapter concurrently, interleaves results round-robin, dedupes by URL. A throttled backend doesn't sink the round — it throws only if *all* fail. |
+
+The fan-out is how the adapter fleet composes: one general-web engine plus one or two domain engines gives the planner a source pool no single backend returns.
+
+```bash
+deepdive "are transformer alternatives viable in 2026" \
+  --search=multi:duckduckgo,arxiv,semanticscholar --deep
+```
 
 Adding a new adapter is ~30 lines: implement `SearchAdapter` in `src/search/*.ts`, register in `src/search.ts`. The full contract + a copy-paste scaffold live in [docs/search-adapter.md](docs/search-adapter.md).
 

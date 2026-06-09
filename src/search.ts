@@ -30,6 +30,26 @@ export async function resolveSearchAdapter(
   name: string,
   env: Record<string, string | undefined>,
 ): Promise<SearchAdapter> {
+  // Fan-out: `multi:a,b[,c…]` resolves each sub-adapter recursively and
+  // interleaves their results. Nesting (`multi:` inside the list) is refused.
+  if (name === "multi" || name.startsWith("multi:")) {
+    const list = name
+      .slice("multi:".length)
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (name === "multi" || list.length < 2) {
+      throw new Error(
+        "multi search needs a comma-separated adapter list, e.g. --search=multi:duckduckgo,wikipedia",
+      );
+    }
+    if (list.some((n) => n === "multi" || n.startsWith("multi:"))) {
+      throw new Error("multi search cannot nest another multi adapter");
+    }
+    const { MultiSearch } = await import("./search/multi.js");
+    const adapters = await Promise.all(list.map((n) => resolveSearchAdapter(n, env)));
+    return new MultiSearch(adapters);
+  }
   switch (name) {
     case "duckduckgo":
     case "ddg": {

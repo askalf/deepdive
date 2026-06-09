@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — `--search=multi:<a>,<b>` fan-out
+
+- **Multi-adapter fan-out** (`src/search/multi.ts`) — `--search=multi:duckduckgo,wikipedia,arxiv` queries every listed adapter **concurrently**, interleaves results round-robin in adapter order, dedupes on the normalized URL, and re-ranks densely. Partial failures are tolerated (a throttled backend doesn't sink the round); it throws only when *every* sub-adapter failed, naming each failure. Sub-adapters resolve recursively (keys still required where applicable); nesting `multi:` is refused. Composite name (`multi(a,b)`) shows up in `doctor` and `search`. New exports: `MultiSearch`, `interleaveResults`.
+
 ### Added — `deepdive rerun <id>`
 
 - **`deepdive rerun <id> [--narrate]`** — the longitudinal workflow in one command: re-run a saved session's question **fresh** (new search + fetches; the parent's sources are deliberately *not* seeded — unlike `continue`, the runs are independent snapshots), save it as a new session linked via `parentId` with the parent's tags inherited (`--tag` overrides), then automatically print the source-set + answer diff against the original. `--narrate` adds the one-shot LLM change summary. In `--json` mode stdout stays a single JSON envelope; a stderr hint points at `deepdive diff a b --json` for the structured delta. `rerun` requires session persistence (errors under `--no-sessions`).
