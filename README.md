@@ -570,7 +570,15 @@ diff  2026-05-07_120000_aaaaaaaa  →  2026-06-01_120000_bbbbbbbb
     + the 5-hour bucket resets at a fixed UTC boundary [2]
 ```
 
-The source-set delta (added / removed / shared) is keyed on the normalized URL, and the answer diff is a deterministic line diff with collapsed unchanged context. Add `--narrate` for a one-shot LLM summary of what *substantively* changed — new claims, dropped claims, reversals — instead of reading the line diff yourself. `--json` emits the structured diff (and narration) for piping. Re-run the same question monthly with `deepdive continue`, then `diff` the sessions to watch a fast-moving topic evolve.
+The source-set delta (added / removed / shared) is keyed on the normalized URL, and the answer diff is a deterministic line diff with collapsed unchanged context. Add `--narrate` for a one-shot LLM summary of what *substantively* changed — new claims, dropped claims, reversals — instead of reading the line diff yourself. `--json` emits the structured diff (and narration) for piping.
+
+**Or do the whole loop in one command.** `deepdive rerun <id>` re-runs a saved session's question **fresh** — new search, new fetches, deliberately *not* seeded with the parent's sources (that's `continue`), so the two runs are independent snapshots — saves the result as a new session linked via `parentId` with the parent's tags inherited, and then prints the diff automatically:
+
+```bash
+deepdive rerun 2026-05-07 --narrate     # monthly check on a fast-moving topic
+```
+
+`rerun` vs `continue`: `continue` *extends* a corpus (keeps the parent's sources, adds pages — answer quality compounds). `rerun` *re-measures* (fresh corpus — what does the web say now?). Use `continue` to go deeper, `rerun` to track change over time.
 
 ---
 

@@ -82,6 +82,9 @@ Usage:
   deepdive continue <id> [<question>]      Full agent run seeded with the saved session's
                                            sources (plans + searches + fetches new pages;
                                            saved as a new session linked via parentId)
+  deepdive rerun <id> [--narrate]          Re-run a saved question fresh (new search +
+                                           fetches), save as a new linked session, and
+                                           print what changed vs the original
   deepdive export <id> [--format=html|md]  Render a saved session as a shareable artifact
                                            (--out=report.html). Format inferred from --out.
   deepdive diff <id-a> <id-b> [--narrate]  Show how the answer + source set changed between
@@ -230,6 +233,7 @@ const SUBCOMMAND_VERBS = new Set([
   "search",
   "open",
   "stats",
+  "rerun",
 ]);
 
 // Exported for unit tests.
@@ -674,13 +678,16 @@ async function main(argv: string[]): Promise<number> {
   if (parsed.question === "stats") {
     return await statsCommand(parsed);
   }
+  if (parsed.question === "rerun") {
+    return await rerunCommand(parsed);
+  }
   if (!parsed.question) {
     process.stderr.write(`deepdive: missing question.\n\n${USAGE}`);
     return 2;
   }
 
   const config = resolveConfig(parsed.flags, process.env);
-  return await runResearch({ question: parsed.question, parsed, config });
+  return (await runResearch({ question: parsed.question, parsed, config })).code;
 }
 
 // Layer config-file base + selected-profile settings into process.env, filling
@@ -829,9 +836,17 @@ interface RunResearchOptions {
   config: import("./config.js").RuntimeConfig;
   preKept?: import("./synthesize.js").SourceWithContent[];
   parentId?: string;
+  // Override the tags persisted on the new session (rerun inherits the
+  // parent's tags when the user didn't pass --tag). Defaults to config.tags.
+  tags?: string[];
 }
 
-async function runResearch(opts: RunResearchOptions): Promise<number> {
+// Returns the exit code plus the persisted session id (when sessions are
+// enabled and the save succeeded) so callers like `rerun` can post-process
+// the new record — e.g. diff it against its parent.
+async function runResearch(
+  opts: RunResearchOptions,
+): Promise<{ code: number; sessionId?: string }> {
   const { question, parsed, config, preKept, parentId } = opts;
   // A --since value that was supplied but didn't parse is a user error — fail
   // loud rather than silently running with no recency filter.
@@ -840,7 +855,7 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
       `deepdive: --since must be a date (2024, 2024-06, 2024-06-15) or a duration ` +
         `(30d, 12h, 2w); got: ${config.sinceRaw}\n`,
     );
-    return 2;
+    return { code: 2 };
   }
   const search = await resolveSearchAdapter(config.searchAdapter, process.env);
   const cache = config.cache.enabled
@@ -932,7 +947,7 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
     let sessionId: string | undefined;
     if (config.sessions.enabled) {
       try {
-        sessionId = await persistSession(question, result, config, parentId);
+        sessionId = await persistSession(question, result, config, parentId, opts.tags);
       } catch (err) {
         // Persistence failure is non-fatal — surface a warning to stderr
         // but don't break the run.
@@ -978,7 +993,7 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
       if (costLine) process.stderr.write(costLine + "\n");
       if (confidenceLine) process.stderr.write(confidenceLine + "\n");
       if (sessionId) writeSessionHint(sessionId);
-      return strictFail ? 1 : 0;
+      return { code: strictFail ? 1 : 0, sessionId };
     }
 
     const output = config.jsonOutput
@@ -1017,17 +1032,17 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
     if (costLine) process.stderr.write(costLine + "\n");
     if (confidenceLine) process.stderr.write(confidenceLine + "\n");
     if (sessionId) writeSessionHint(sessionId);
-    return strictFail ? 1 : 0;
+    return { code: strictFail ? 1 : 0, sessionId };
   } catch (err) {
     // v0.11.0 — distinct exit code for "we deliberately stopped because
     // the budget cap was hit". Wrapping scripts can branch on `=== 2`
     // (cap) vs `=== 1` (real error).
     if (err instanceof BudgetExceededError) {
       process.stderr.write(`deepdive: ${err.message}\n`);
-      return 2;
+      return { code: 2 };
     }
     process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
-    return 1;
+    return { code: 1 };
   } finally {
     process.off("SIGINT", sigint);
     process.off("SIGTERM", sigint);
@@ -1042,8 +1057,10 @@ async function persistSession(
   result: import("./agent.js").AgentResult,
   config: import("./config.js").RuntimeConfig,
   parentId?: string,
+  tagsOverride?: string[],
 ): Promise<string> {
   const id = generateSessionId();
+  const tags = tagsOverride ?? config.tags;
   const record = {
     schema: 1 as const,
     id,
@@ -1057,7 +1074,7 @@ async function persistSession(
     cost: result.cost,
     llm: { baseUrl: config.llm.baseUrl, model: config.llm.model },
     ...(parentId ? { parentId } : {}),
-    ...(config.tags.length > 0 ? { tags: config.tags } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
   };
   await saveSession(record, { dir: config.sessions.dir });
   return id;
@@ -1500,13 +1517,98 @@ async function continueCommand(parsed: ParsedArgs): Promise<number> {
   // type just `deepdive continue <id>` to run again from where they
   // left off with new search results.
   const newQuestion = parsed.extras[1] ?? record.question;
-  return await runResearch({
-    question: newQuestion,
+  return (
+    await runResearch({
+      question: newQuestion,
+      parsed,
+      config,
+      preKept: record.sources,
+      parentId: id,
+    })
+  ).code;
+}
+
+// `deepdive rerun <id> [--narrate]` — the longitudinal workflow in one
+// command: re-run a saved session's question FRESH (new search, new fetches —
+// unlike `continue`, the parent's sources are deliberately not seeded, so the
+// two runs are independent snapshots), save it as a new session linked via
+// parentId, then print how the answer and source set changed. Tags are
+// inherited from the parent unless --tag overrides. `--narrate` adds the
+// one-shot LLM summary of the substantive changes.
+async function rerunCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const idArg = parsed.extras[0];
+  if (!idArg) {
+    process.stderr.write(
+      `deepdive: rerun requires a session id (try \`deepdive sessions ls\`)\n`,
+    );
+    return 2;
+  }
+  if (!config.sessions.enabled) {
+    process.stderr.write(
+      `deepdive: rerun needs session persistence to diff against the parent — drop --no-sessions\n`,
+    );
+    return 2;
+  }
+  const dir = { dir: config.sessions.dir };
+  let parent: import("./sessions.js").SessionRecord;
+  try {
+    const id = await resolveSessionId(idArg, dir);
+    parent = await loadSession(id, dir);
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return 1;
+  }
+
+  const { code, sessionId } = await runResearch({
+    question: parent.question,
     parsed,
     config,
-    preKept: record.sources,
-    parentId: id,
+    parentId: parent.id,
+    // Inherit the parent's tags so the lineage stays organized, unless the
+    // user explicitly re-tagged this run.
+    tags: config.tags.length > 0 ? config.tags : parent.tags ?? [],
   });
+  if (code !== 0 || !sessionId) return code;
+
+  // Post-run: show what changed. In --json mode stdout already carries the
+  // run's JSON envelope — keep it a single document and point at `diff` for
+  // the structured delta instead.
+  if (config.jsonOutput) {
+    process.stderr.write(
+      `rerun     ${parent.id} → ${sessionId}  (deepdive diff ${parent.id} ${sessionId} --json)\n`,
+    );
+    return code;
+  }
+  try {
+    const fresh = await loadSession(sessionId, dir);
+    const diff = diffSessions(parent, fresh);
+    const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+    process.stdout.write(
+      `\n---\n\n## What changed since ${isoDayOf(parent.createdAt)}\n\n` +
+        renderDiffText(diff, { color: useColor }) +
+        "\n",
+    );
+    if (parsed.flags.narrate) {
+      const { text } = await callLLM(
+        [{ role: "user", content: buildDiffNarrateUser(parent, fresh) }],
+        DIFF_NARRATE_SYSTEM,
+        config.llm,
+      );
+      process.stdout.write(`\n## What changed (narrated)\n\n${text.trim()}\n`);
+    }
+  } catch (err) {
+    // The run itself succeeded — a diff failure shouldn't fail the command.
+    process.stderr.write(
+      `deepdive: warning: could not diff against parent (${safeErrorMessage(err)})\n`,
+    );
+  }
+  return code;
+}
+
+function isoDayOf(ms: number): string {
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? "?" : d.toISOString().slice(0, 10);
 }
 
 // Only run main() when invoked as a script, not when imported (e.g. by tests

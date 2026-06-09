@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — `deepdive rerun <id>`
+
+- **`deepdive rerun <id> [--narrate]`** — the longitudinal workflow in one command: re-run a saved session's question **fresh** (new search + fetches; the parent's sources are deliberately *not* seeded — unlike `continue`, the runs are independent snapshots), save it as a new session linked via `parentId` with the parent's tags inherited (`--tag` overrides), then automatically print the source-set + answer diff against the original. `--narrate` adds the one-shot LLM change summary. In `--json` mode stdout stays a single JSON envelope; a stderr hint points at `deepdive diff a b --json` for the structured delta. `rerun` requires session persistence (errors under `--no-sessions`).
+- Internal: `runResearch` now returns `{ code, sessionId }` so subcommands can post-process the saved record; `persistSession` accepts a tags override.
+
 ## [0.17.0] - 2026-06-09
 
 ### Added — session tags
