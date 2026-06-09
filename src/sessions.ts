@@ -38,6 +38,10 @@ export interface SessionRecord {
   // undefined. Lets `sessions ls` (in a future release) render the
   // parent chain and `show` link back.
   parentId?: string;
+  // v0.17.0 — user labels for organizing the corpus (--tag on a run, or
+  // `sessions tag <id> <tags>` after the fact). Normalized lowercase,
+  // deduped. Additive optional; older records load with tags undefined.
+  tags?: string[];
 }
 
 export interface SessionMeta {
@@ -47,6 +51,7 @@ export interface SessionMeta {
   sourceCount: number;
   rounds: number;
   model: string;
+  tags?: string[];
 }
 
 export interface SessionStorageOptions {
@@ -145,6 +150,7 @@ export async function listSessions(
         sourceCount: r.sources.length,
         rounds: r.rounds.length,
         model: r.llm?.model ?? "(unknown)",
+        ...(Array.isArray(r.tags) && r.tags.length > 0 ? { tags: r.tags } : {}),
       });
     } catch {
       bad.push(f);
@@ -235,11 +241,59 @@ export function renderSessionsList(metas: SessionMeta[]): string {
     const ago = humanDuration(Date.now() - m.createdAt);
     const q =
       m.question.length > 60 ? m.question.slice(0, 59) + "…" : m.question;
+    const tags =
+      m.tags && m.tags.length > 0 ? "  " + m.tags.map((t) => `#${t}`).join(" ") : "";
     lines.push(
-      `  ${m.id}  ${ago.padStart(8)}  ${m.sourceCount} src · ${m.rounds} round  ${q}`,
+      `  ${m.id}  ${ago.padStart(8)}  ${m.sourceCount} src · ${m.rounds} round  ${q}${tags}`,
     );
   }
   return lines.join("\n");
+}
+
+// ── Tags ─────────────────────────────────────────────────────────────────────
+
+// Exported for unit tests. Normalize a raw tag list: trim, lowercase, drop
+// empties and the leading '#' people will inevitably type, dedupe, preserve
+// first-seen order. Tags are labels — lowercase keeps filtering predictable.
+export function normalizeTags(raw: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const r of raw) {
+    const t = r.trim().replace(/^#/, "").toLowerCase();
+    if (t.length === 0 || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+// Adds tags to a saved session (load → merge → atomic save). Returns the
+// updated tag list.
+export async function tagSession(
+  id: string,
+  tags: string[],
+  opts: SessionStorageOptions,
+): Promise<string[]> {
+  const record = await loadSession(id, opts);
+  const merged = normalizeTags([...(record.tags ?? []), ...tags]);
+  record.tags = merged;
+  await saveSession(record, opts);
+  return merged;
+}
+
+// Removes tags from a saved session. Returns the remaining tag list.
+export async function untagSession(
+  id: string,
+  tags: string[],
+  opts: SessionStorageOptions,
+): Promise<string[]> {
+  const record = await loadSession(id, opts);
+  const remove = new Set(normalizeTags(tags));
+  const remaining = (record.tags ?? []).filter((t) => !remove.has(t));
+  if (remaining.length > 0) record.tags = remaining;
+  else delete record.tags;
+  await saveSession(record, opts);
+  return remaining;
 }
 
 // Exported for tests.

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — session tags
+
+- **`--tag=<name>[,<name>]`** (env `DEEPDIVE_TAGS`, config-file key `tags`) — label a run's saved session. Tags are normalized (trimmed, lowercased, `#`-stripped, deduped) and stored as an additive optional `tags` field on the record (older sessions load unchanged).
+- **`deepdive sessions tag <id> <tags>` / `sessions untag <id> <tags>`** — retro-label a saved session; atomic load→merge→save. Untagging to empty removes the field.
+- **Tag filtering** — `sessions ls --tag=<t>` and `stats --tag=<t>` scope to sessions carrying *every* listed tag, so per-client/per-project research cost is one command. The filter comes only from the explicit `--tag` flag — a config-file default tag labels new runs but never silently hides sessions from listings. Tags render as `#name` in `sessions ls`.
+- New exports: `normalizeTags`, `tagSession`, `untagSession`.
+
 ### Added — near-duplicate source dedup
 
 - **Near-duplicate detection** (`src/similarity.ts`) — a fetched source whose extracted content is ≥ 90% shingle-similar (word 5-gram Jaccard) to an already-kept source is dropped with a new `near-duplicate` `fetch.skipped` reason. Catches the same article syndicated across hosts (wire copies, mirrors, AMP), which URL-level dedupe can't. **Default on** — the conservative 0.9 threshold only fires on genuine copies (different articles on the same topic typically score < 0.3). Tune with `--dedupe-threshold=<0..1>` (`DEEPDIVE_DEDUPE_THRESHOLD`); disable with `--no-dedupe` (`DEEPDIVE_NO_DEDUPE=1`). Config-file keys: `dedupe` (boolean), `dedupeThreshold`. `--include` / `continue` sources are never dropped — they act as dedupe anchors so a re-search can't re-add a copy of what you already have. New pure exports: `contentShingles`, `jaccard`, `findNearDuplicate`, `DEFAULT_NEAR_DUPE_THRESHOLD`.

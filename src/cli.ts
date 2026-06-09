@@ -40,6 +40,8 @@ import {
   pruneSessions,
   parseDuration,
   loadAllSessions,
+  tagSession,
+  untagSession,
 } from "./sessions.js";
 import { aggregateSessionStats, renderStats } from "./stats.js";
 import { renderHtmlReport } from "./html-export.js";
@@ -68,8 +70,12 @@ const USAGE = `deepdive — local research agent
 Usage:
   deepdive "<question>" [flags]            Run the research agent
   deepdive doctor [flags]                  Health check — paste the output when filing issues
-  deepdive sessions ls [<filter>]          List saved sessions (optional question substring)
+  deepdive sessions ls [<filter>]          List saved sessions (optional question substring;
+                                           --tag=<t> filters by tag)
+  deepdive sessions tag <id> <tags>        Add comma-separated tags to a saved session
+  deepdive sessions untag <id> <tags>      Remove tags from a saved session
   deepdive stats                           Aggregate cost / sources / models across sessions
+                                           (--tag=<t> scopes to tagged sessions)
   deepdive show <id>                       Print a saved session's markdown answer
   deepdive resume <id> [<question>]        Re-synthesize against a saved session's
                                            sources (cheap iteration; no re-fetching)
@@ -157,6 +163,8 @@ Flags:
                                 :11434 (Ollama), :8000 default to openai;
                                 everything else to anthropic).
   --tldr                        Lead the answer with a one-paragraph TL;DR (env: DEEPDIVE_TLDR)
+  --tag=<name>[,<name>]         Label this run's saved session (env: DEEPDIVE_TAGS). On
+                                sessions ls / stats, filters by tag instead.
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
   --format=<html|md>            export: output format (default: inferred from --out, else html)
@@ -184,7 +192,7 @@ Environment:
   DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK,
   DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES,
   DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_SINCE, DEEPDIVE_API_FORMAT,
-  DEEPDIVE_NO_DEDUPE, DEEPDIVE_DEDUPE_THRESHOLD,
+  DEEPDIVE_NO_DEDUPE, DEEPDIVE_DEDUPE_THRESHOLD, DEEPDIVE_TAGS,
   DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR, DEEPDIVE_CONFIG
 
 Config file:
@@ -382,6 +390,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "include":
           flags.include = value
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          break;
+        case "tag":
+          flags.tag = value
             .split(",")
             .map((s) => s.trim())
             .filter((s) => s.length > 0);
@@ -1043,6 +1057,7 @@ async function persistSession(
     cost: result.cost,
     llm: { baseUrl: config.llm.baseUrl, model: config.llm.model },
     ...(parentId ? { parentId } : {}),
+    ...(config.tags.length > 0 ? { tags: config.tags } : {}),
   };
   await saveSession(record, { dir: config.sessions.dir });
   return id;
@@ -1057,35 +1072,95 @@ async function sessionsCommand(parsed: ParsedArgs): Promise<number> {
   const sub = parsed.extras[0] ?? "ls";
   switch (sub) {
     case "ls":
-      return await sessionsLs(config, parsed.extras[1]);
+      return await sessionsLs(config, parsed.extras[1], tagFilterFrom(parsed));
     case "rm":
       return await sessionsRm(parsed, config);
     case "prune":
       return await sessionsPrune(parsed, config);
+    case "tag":
+      return await sessionsTag(parsed, config, "tag");
+    case "untag":
+      return await sessionsTag(parsed, config, "untag");
     default:
       process.stderr.write(
-        `deepdive: unknown sessions sub-command: ${sub} (try: ls | rm | prune)\n`,
+        `deepdive: unknown sessions sub-command: ${sub} (try: ls | rm | prune | tag | untag)\n`,
       );
       return 2;
   }
 }
 
+// `deepdive sessions tag <id> <tag>[,<tag>...]` / `sessions untag <id> <tags>`
+// — retro-label a saved session ("oh, that run was for client X").
+async function sessionsTag(
+  parsed: ParsedArgs,
+  config: import("./config.js").RuntimeConfig,
+  mode: "tag" | "untag",
+): Promise<number> {
+  const idArg = parsed.extras[1];
+  const tagArg = parsed.extras[2];
+  if (!idArg || !tagArg) {
+    process.stderr.write(
+      `deepdive: sessions ${mode} requires a session id and a comma-separated tag list\n` +
+        `  e.g. deepdive sessions ${mode} 2026-06-09 client-x,audit\n`,
+    );
+    return 2;
+  }
+  const tags = tagArg
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  try {
+    const dir = { dir: config.sessions.dir };
+    const id = await resolveSessionId(idArg, dir);
+    const result =
+      mode === "tag" ? await tagSession(id, tags, dir) : await untagSession(id, tags, dir);
+    process.stdout.write(
+      `${id}  ${result.length > 0 ? result.map((t) => `#${t}`).join(" ") : "(no tags)"}\n`,
+    );
+    return 0;
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return 1;
+  }
+}
+
+// The ls/stats tag FILTER comes only from the explicit --tag flag. config.tags
+// also absorbs DEEPDIVE_TAGS / the config-file `tags` key, but those mean
+// "label my new runs by default" — using them as a filter would make a
+// config-file default silently hide sessions from listings.
+function tagFilterFrom(parsed: ParsedArgs): string[] {
+  return (parsed.flags.tag ?? [])
+    .map((t) => t.trim().replace(/^#/, "").toLowerCase())
+    .filter((t) => t.length > 0);
+}
+
 async function sessionsLs(
   config: import("./config.js").RuntimeConfig,
   filter?: string,
+  tagFilter: string[] = [],
 ): Promise<number> {
   const { sessions, bad } = await listSessions({ dir: config.sessions.dir });
-  // Optional case-insensitive substring filter on the question text.
+  // Optional case-insensitive substring filter on the question text, plus an
+  // optional tag filter (--tag=x — a session must carry EVERY listed tag).
   const needle = filter?.toLowerCase();
-  const shown = needle
+  let shown = needle
     ? sessions.filter((s) => s.question.toLowerCase().includes(needle))
     : sessions;
+  if (tagFilter.length > 0) {
+    shown = shown.filter((s) => tagFilter.every((t) => (s.tags ?? []).includes(t)));
+  }
   if (config.jsonOutput) {
     process.stdout.write(JSON.stringify({ sessions: shown, bad }, null, 2) + "\n");
     return 0;
   }
-  if (needle && shown.length === 0) {
-    process.stdout.write(`(no sessions match "${filter}")\n`);
+  if ((needle || tagFilter.length > 0) && shown.length === 0) {
+    const what = [
+      needle ? `"${filter}"` : "",
+      tagFilter.length > 0 ? tagFilter.map((t) => `#${t}`).join(" ") : "",
+    ]
+      .filter(Boolean)
+      .join(" + ");
+    process.stdout.write(`(no sessions match ${what})\n`);
     return 0;
   }
   process.stdout.write(renderSessionsList(shown) + "\n");
@@ -1103,7 +1178,14 @@ async function sessionsLs(
 async function statsCommand(parsed: ParsedArgs): Promise<number> {
   const config = resolveConfig(parsed.flags, process.env);
   const { records, bad } = await loadAllSessions({ dir: config.sessions.dir });
-  const stats = aggregateSessionStats(records);
+  // --tag=x restricts the aggregation to sessions carrying every listed tag
+  // (explicit flag only — see tagFilterFrom).
+  const tagFilter = tagFilterFrom(parsed);
+  const scoped =
+    tagFilter.length > 0
+      ? records.filter((r) => tagFilter.every((t) => (r.tags ?? []).includes(t)))
+      : records;
+  const stats = aggregateSessionStats(scoped);
   if (config.jsonOutput) {
     process.stdout.write(JSON.stringify({ stats, bad }, null, 2) + "\n");
     return 0;

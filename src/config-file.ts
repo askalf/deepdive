@@ -70,6 +70,7 @@ const KEY_MAP: Record<string, { env: string; kind: Kind }> = {
   since: { env: "DEEPDIVE_SINCE", kind: "string" },
   dedupeThreshold: { env: "DEEPDIVE_DEDUPE_THRESHOLD", kind: "number" },
   include: { env: "DEEPDIVE_INCLUDE", kind: "list" },
+  tags: { env: "DEEPDIVE_TAGS", kind: "list" },
   tldr: { env: "DEEPDIVE_TLDR", kind: "bool" },
   strictCites: { env: "DEEPDIVE_STRICT_CITES", kind: "bool" },
   verbose: { env: "DEEPDIVE_VERBOSE", kind: "bool" },

@@ -7,7 +7,7 @@ import type { LLMConfig } from "./llm.js";
 import type { BrowserOptions } from "./browser.js";
 import { parseDomainList, type DomainFilter } from "./domain-filter.js";
 import { detectApiFormat, type ApiFormat } from "./llm-format.js";
-import { defaultSessionsDir } from "./sessions.js";
+import { defaultSessionsDir, normalizeTags } from "./sessions.js";
 import { parseMaxCost } from "./budget.js";
 import { resolveSince } from "./dates.js";
 
@@ -45,6 +45,9 @@ export interface RuntimeConfig {
   // v0.17.0 — near-duplicate dedup of fetched sources (default on).
   dedupeNearDupes: boolean;
   nearDupeThreshold: number;
+  // v0.17.0 — tags applied to this run's saved session (--tag / DEEPDIVE_TAGS).
+  // Also doubles as the filter for `sessions ls --tag` / `stats --tag`.
+  tags: string[];
   // v0.15.0 — recency cutoff (epoch ms). Sources dated before this are
   // dropped. Undefined = no recency filter. Set via --since / DEEPDIVE_SINCE.
   sinceMs?: number;
@@ -92,6 +95,7 @@ export interface CLIFlags {
   since?: string;
   noDedupe?: boolean;
   dedupeThreshold?: number;
+  tag?: string[];
   // v0.11.0 — already-parsed budget cap in USD. CLI parser converts
   // "--max-cost=$0.50" / "$5" / "0.25" into a number; resolveConfig
   // accepts the parsed value (parseMaxCost lives in budget.ts and the
@@ -266,6 +270,12 @@ export function resolveConfig(
   const tldr = flags.tldr ?? env.DEEPDIVE_TLDR === "1";
   const sinceRaw = flags.since ?? env.DEEPDIVE_SINCE;
   const sinceMs = sinceRaw ? resolveSince(sinceRaw) : undefined;
+  const tagsFromEnv = (env.DEEPDIVE_TAGS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const tags = normalizeTags(flags.tag ?? tagsFromEnv);
+
   const dedupeNearDupes = !(flags.noDedupe ?? env.DEEPDIVE_NO_DEDUPE === "1");
   const nearDupeThreshold =
     flags.dedupeThreshold ??
@@ -320,6 +330,7 @@ export function resolveConfig(
     tldr,
     dedupeNearDupes,
     nearDupeThreshold,
+    tags,
     sinceMs,
     sinceRaw,
   };
