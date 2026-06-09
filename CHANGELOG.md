@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-09
+
 ### Added — `search` and `open` convenience commands
 
 - **`deepdive search "<query>"`** — run just the configured search adapter and print the raw candidate list (no LLM, no fetch, no browser). Honors `--search` and `--json`; `--results-per-query` sets the count (default 10). A cheap way to preview a backend or debug an adapter.
