@@ -39,6 +39,7 @@ import {
   parseDuration,
 } from "./sessions.js";
 import { renderHtmlReport } from "./html-export.js";
+import { assessConfidence, formatConfidenceLine } from "./confidence.js";
 import {
   diffSessions,
   renderDiffText,
@@ -129,6 +130,7 @@ Flags:
                                 auto-detected from --base-url (api.openai.com,
                                 :11434 (Ollama), :8000 default to openai;
                                 everything else to anthropic).
+  --tldr                        Lead the answer with a one-paragraph TL;DR (env: DEEPDIVE_TLDR)
   --json                        Emit a JSON result to stdout instead of markdown
   --out=<path>                  Write the output (markdown or json) to a file too
   --format=<html|md>            export: output format (default: inferred from --out, else html)
@@ -149,7 +151,7 @@ Environment:
   DEEPDIVE_WIKIPEDIA_LANG, DEEPDIVE_GITHUB_TOKEN,
   DEEPDIVE_MAX_SOURCES, DEEPDIVE_FETCH_TIMEOUT_MS, DEEPDIVE_HEADED,
   DEEPDIVE_DEEP_ROUNDS, DEEPDIVE_CONCURRENCY, DEEPDIVE_NO_CACHE,
-  DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE,
+  DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE, DEEPDIVE_TLDR,
   DEEPDIVE_LLM_TIMEOUT_MS, DEEPDIVE_LLM_ATTEMPTS,
   DEEPDIVE_NO_VERIFY_CITES, DEEPDIVE_STRICT_CITES, DEEPDIVE_CITE_MIN_RECALL,
   DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK,
@@ -231,6 +233,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--no-stream") {
       flags.noStream = true;
+      continue;
+    }
+    if (a === "--tldr") {
+      flags.tldr = true;
       continue;
     }
     if (a === "--narrate") {
@@ -648,6 +654,7 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
         pdfMaxPages: config.pdfMaxPages,
         include: config.include,
         domainFilter: config.domainFilter,
+        tldr: config.tldr,
         env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
@@ -707,6 +714,16 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
         ? renderMultiModelCostSummary(result.cost, config.llm.baseUrl)
         : "";
 
+    // Coverage/confidence signal — computed always (goes into --json), shown on
+    // stderr alongside the cost summary (suppressed by --no-cost / --json).
+    const confidence = assessConfidence({
+      sources: result.usage.kept,
+      citationsTotal: result.usage.citationsTotal,
+      citationsSupported: result.usage.citationsSupported,
+    });
+    const confidenceLine =
+      config.costEnabled && !config.jsonOutput ? formatConfidenceLine(confidence) : "";
+
     if (streaming && streamed) {
       // Streaming mode already wrote the header + answer tokens. Close with
       // the sources block, optional citation-health footer, and (if
@@ -720,6 +737,7 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
         process.stderr.write(`\nwrote ${path}\n`);
       }
       if (costLine) process.stderr.write(costLine + "\n");
+      if (confidenceLine) process.stderr.write(confidenceLine + "\n");
       if (sessionId) writeSessionHint(sessionId);
       return strictFail ? 1 : 0;
     }
@@ -735,11 +753,13 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
               url: s.url,
               title: s.title,
               fetchedAt: s.fetchedAt,
+              publishedAt: s.publishedAt,
             })),
             answer: result.answer,
             verification: result.verification,
             cost: result.cost,
             usage: result.usage,
+            confidence,
           },
           null,
           2,
@@ -756,6 +776,7 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
       process.stderr.write(`\nwrote ${path}\n`);
     }
     if (costLine) process.stderr.write(costLine + "\n");
+    if (confidenceLine) process.stderr.write(confidenceLine + "\n");
     if (sessionId) writeSessionHint(sessionId);
     return strictFail ? 1 : 0;
   } catch (err) {
@@ -1071,19 +1092,16 @@ async function resumeCommand(parsed: ParsedArgs): Promise<number> {
     // v0.10.0 — resume re-synthesizes against saved sources, so use the
     // synth-stage model (no plan / critic stages in resume mode).
     const synthLLM = { ...config.llm, model: config.models.synth };
-    const answer = await synthesize(
-      newQuestion,
-      record.sources,
-      synthLLM,
-      ac.signal,
-      streaming
+    const answer = await synthesize(newQuestion, record.sources, synthLLM, ac.signal, {
+      onToken: streaming
         ? (chunk) => {
             streamed = true;
             process.stdout.write(chunk);
           }
         : undefined,
       onUsage,
-    );
+      tldr: config.tldr,
+    });
 
     // Cite verification (final only — no in-loop because there's no loop)
     let verification;

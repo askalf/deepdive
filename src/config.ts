@@ -39,6 +39,8 @@ export interface RuntimeConfig {
   verbose: boolean;
   // v0.11.0 — budget cap in USD. Undefined = no cap.
   maxCostUsd?: number;
+  // v0.14.0 — lead the answer with a one-paragraph TL;DR. Opt-in.
+  tldr: boolean;
 }
 
 export interface CLIFlags {
@@ -76,6 +78,7 @@ export interface CLIFlags {
   json?: boolean;
   noStream?: boolean;
   verbose?: boolean;
+  tldr?: boolean;
   // v0.11.0 — already-parsed budget cap in USD. CLI parser converts
   // "--max-cost=$0.50" / "$5" / "0.25" into a number; resolveConfig
   // accepts the parsed value (parseMaxCost lives in budget.ts and the
@@ -244,6 +247,7 @@ export function resolveConfig(
   // CLI can further require stdout.isTTY before enabling.
   const streamEnabled = !streamOptOut && !jsonOutput;
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
+  const tldr = flags.tldr ?? env.DEEPDIVE_TLDR === "1";
 
   // v0.11.0 — budget cap. Flag takes a pre-parsed number from cli.ts
   // (which uses parseMaxCost on the raw string). Env var is parsed here.
@@ -290,6 +294,7 @@ export function resolveConfig(
     streamEnabled,
     verbose,
     maxCostUsd,
+    tldr,
   };
 }
 

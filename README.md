@@ -182,6 +182,24 @@ What this is not: a semantic judge. Lexical recall flags hallucinated names, num
 
 ---
 
+## Recency and confidence
+
+Two signals that help you read a report at a glance.
+
+**Published dates.** When deepdive fetches a page, it tries to recover the page's publication date from the rendered HTML — JSON-LD `datePublished`, `<meta property="article:published_time">` and friends, or a `<time datetime>` element. When it finds one, the source row shows it (`fetched 2026-05-07 · published 2024-03-15`), the HTML export shows it, the JSON carries it as `publishedAt`, **and** the synthesizer sees it — so when sources disagree it can prefer the more recent one and flag claims that come from an older page. Pages that don't expose a date (many SPAs) simply don't get the annotation; nothing breaks.
+
+**Confidence.** After each run, alongside the cost line, deepdive prints a one-line coverage read:
+
+```
+confidence · high · 11 sources · 18/18 citations supported
+```
+
+It's a deterministic heuristic over what the run produced — sources kept, and how many of the answer's own `[N]` citations cleared the lexical verifier — not a claim that the answer is *correct*. `low` flags the things worth double-checking: a thin source base, an answer that cited nothing the verifier could check, or citations that failed support. The same assessment is in `--json` as `confidence`. Suppress the stderr line with `--no-cost`.
+
+**TL;DR.** Pass `--tldr` (or `DEEPDIVE_TLDR=1`) to have the synthesizer lead with a one-paragraph, still-cited summary before the full answer — handy when you want the bottom line first and the detail underneath. Off by default; output is byte-identical to before when unset.
+
+---
+
 ## PDFs and local files
 
 Two long-standing gaps closed in v0.7: real research questions hit PDFs constantly (academic papers, RFCs, standards docs), and the most useful sources are often already on your laptop (project notes, internal docs, exported chats). deepdive now reads both.
@@ -315,6 +333,7 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | Flag | Default | Why |
 |---|---|---|
 | `--deep[=<n>]` | off (bare = 2) | Turn on the critic loop. This is the headline feature. |
+| `--tldr` | off | Lead the answer with a one-paragraph TL;DR before the full detail. |
 | `--model=<name>` | `claude-sonnet-4-6` | Try `claude-opus-4-7` on reasoning-heavy questions. |
 | `--search=<adapter>` | `duckduckgo` | `searxng` for privacy, `brave` for quality, `tavily` or `exa` for research-tuned results. |
 | `--max-sources=<n>` | `12` per round | Upper bound. Deep mode accumulates across rounds, capped each round. |

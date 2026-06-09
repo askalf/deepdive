@@ -24,7 +24,20 @@ export {
 } from "./search.js";
 export { BrowserSession, type BrowserOptions, type FetchedPage } from "./browser.js";
 export { extractContent, type ExtractedContent } from "./extract.js";
-export { synthesize, type SourceWithContent } from "./synthesize.js";
+export { synthesize, type SourceWithContent, type SynthesizeOptions } from "./synthesize.js";
+export {
+  extractPublishedDate,
+  metaTags,
+  jsonLdDates,
+  toEpoch,
+} from "./dates.js";
+export {
+  assessConfidence,
+  formatConfidenceLine,
+  type ConfidenceLevel,
+  type ConfidenceInput,
+  type ConfidenceAssessment,
+} from "./confidence.js";
 export {
   buildSourceTable,
   renderAnswerMarkdown,

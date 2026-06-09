@@ -7,6 +7,10 @@ export interface Source {
   url: string;
   title: string;
   fetchedAt: number;
+  // v0.14.0 — page publication date as epoch ms, when one could be extracted
+  // from the page (JSON-LD / meta / <time>). Optional and additive: older
+  // sessions and PDF/local sources load with it undefined.
+  publishedAt?: number;
 }
 
 export function buildSourceTable(sources: Omit<Source, "id">[]): Source[] {
@@ -18,7 +22,11 @@ export function renderSourcesMarkdown(sources: Source[]): string {
   const lines = sources.map((s) => {
     const date = new Date(s.fetchedAt).toISOString().slice(0, 10);
     const safeTitle = escapeMd(s.title) || s.url;
-    return `${s.id}. [${safeTitle}](${s.url}) — fetched ${date}`;
+    const published =
+      typeof s.publishedAt === "number"
+        ? ` · published ${new Date(s.publishedAt).toISOString().slice(0, 10)}`
+        : "";
+    return `${s.id}. [${safeTitle}](${s.url}) — fetched ${date}${published}`;
   });
   return "## Sources\n\n" + lines.join("\n") + "\n";
 }
