@@ -10,7 +10,9 @@
 // events go to stderr when --verbose is set or DEEPDIVE_VERBOSE=1.
 
 import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolveConfig, type CLIFlags } from "./config.js";
 import { parseMaxCost, BudgetExceededError } from "./budget.js";
@@ -43,6 +45,7 @@ import { assessConfidence, formatConfidenceLine } from "./confidence.js";
 import { loadConfigFile, fileConfigToEnv } from "./config-file.js";
 import { resolveProfile } from "./profiles.js";
 import { completionScript, type Shell } from "./completion.js";
+import { browserOpenCommand } from "./open.js";
 import {
   diffSessions,
   renderDiffText,
@@ -77,6 +80,10 @@ Usage:
   deepdive sessions rm <id> [<id>...]      Delete one or more saved sessions
   deepdive sessions prune --older-than=30d Delete old sessions (and/or --keep=<n> newest;
                                            --dry-run to preview)
+  deepdive search "<query>"                Run just the search adapter, print raw results
+                                           (no LLM/fetch). Honors --search / --json.
+  deepdive open <id>                       Render a session to HTML and open it in the
+                                           browser (--out to keep the file)
   deepdive completion <bash|zsh|fish>      Print a shell completion script
   deepdive --help                          Show this help
 
@@ -202,6 +209,8 @@ const SUBCOMMAND_VERBS = new Set([
   "export",
   "diff",
   "completion",
+  "search",
+  "open",
 ]);
 
 // Exported for unit tests.
@@ -616,6 +625,12 @@ async function main(argv: string[]): Promise<number> {
   if (parsed.question === "diff") {
     return await diffCommand(parsed);
   }
+  if (parsed.question === "search") {
+    return await searchCommand(parsed);
+  }
+  if (parsed.question === "open") {
+    return await openCommand(parsed);
+  }
   if (!parsed.question) {
     process.stderr.write(`deepdive: missing question.\n\n${USAGE}`);
     return 2;
@@ -665,6 +680,98 @@ function completionCommand(parsed: ParsedArgs): number {
   }
   process.stdout.write(completionScript(shell as Shell));
   return 0;
+}
+
+// `deepdive search "<query>" [--search=<adapter>] [--json]` — run just the
+// search adapter and print the raw candidate list. No LLM, no fetch, no
+// browser — a cheap way to preview what a backend returns or debug an adapter.
+async function searchCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const query = parsed.extras[0];
+  if (!query) {
+    process.stderr.write(
+      `deepdive: search requires a query (e.g. deepdive search "rust async" --search=hackernews)\n`,
+    );
+    return 2;
+  }
+  let adapter;
+  try {
+    adapter = await resolveSearchAdapter(config.searchAdapter, process.env);
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return 1;
+  }
+  const ac = new AbortController();
+  const sigint = () => ac.abort();
+  process.on("SIGINT", sigint);
+  process.on("SIGTERM", sigint);
+  try {
+    const count = parsed.flags.resultsPerQuery ?? 10;
+    const results = await adapter.search(query, count, ac.signal);
+    if (config.jsonOutput) {
+      process.stdout.write(
+        JSON.stringify({ adapter: adapter.name, query, results }, null, 2) + "\n",
+      );
+      return 0;
+    }
+    if (results.length === 0) {
+      process.stdout.write(`(no results from ${adapter.name} for "${query}")\n`);
+      return 0;
+    }
+    const lines = results.map((r) => {
+      const snip = r.snippet
+        ? `\n     ${ellipsize(r.snippet.replace(/\s+/g, " "), 100)}`
+        : "";
+      return `${String(r.rank).padStart(2)}. ${r.title || r.url}\n     ${r.url}${snip}`;
+    });
+    process.stdout.write(lines.join("\n") + "\n");
+    return 0;
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return 1;
+  } finally {
+    process.off("SIGINT", sigint);
+    process.off("SIGTERM", sigint);
+  }
+}
+
+// `deepdive open <id> [--out=path]` — render a saved session to a self-
+// contained HTML file (temp dir, or --out) and open it in the default browser.
+// The browser spawn is best-effort; the file path is always printed so a
+// headless box can open it manually.
+async function openCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const idArg = parsed.extras[0];
+  if (!idArg) {
+    process.stderr.write(
+      `deepdive: open requires a session id (try \`deepdive sessions ls\`)\n`,
+    );
+    return 2;
+  }
+  try {
+    const id = await resolveSessionId(idArg, { dir: config.sessions.dir });
+    const record = await loadSession(id, { dir: config.sessions.dir });
+    const file = parsed.outPath
+      ? resolve(parsed.outPath)
+      : join(tmpdir(), `deepdive-${id}.html`);
+    writeFileSync(file, renderHtmlReport(record), "utf-8");
+    const { cmd, args } = browserOpenCommand(process.platform, file);
+    try {
+      const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+      // Opener missing (e.g. headless box with no xdg-open) is non-fatal — the
+      // path is printed for manual opening.
+      child.on("error", () => undefined);
+      child.unref();
+    } catch {
+      /* non-fatal */
+    }
+    process.stderr.write(`opened ${file}\n`);
+    process.stdout.write(file + "\n");
+    return 0;
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return 1;
+  }
 }
 
 // v0.12.0 — the shared research path used by both the default
