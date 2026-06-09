@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-09
+
 ### Added — two scholarly search adapters (Semantic Scholar, OpenAlex)
 
 - **`--search=semanticscholar`** (alias `s2`, `src/search/semanticscholar.ts`) — academic paper search via the S2 Graph API. Keyless works but is heavily rate-limited (frequent 429s); `DEEPDIVE_S2_KEY` makes it reliable. Snippet shows citations/year/authors.
