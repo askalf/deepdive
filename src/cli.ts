@@ -105,11 +105,12 @@ Flags:
   --max-tokens=<n>              Output max tokens per LLM call. Default: 4096
   --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa |
                                 auto | wikipedia | arxiv | github | hackernews |
-                                stackexchange | pubmed
+                                stackexchange | pubmed | semanticscholar | openalex
                                 Default: duckduckgo (no key required). wikipedia, arxiv,
-                                hackernews, stackexchange, and pubmed need no key; github
-                                works keyless (DEEPDIVE_GITHUB_TOKEN raises the limit).
-                                'auto' runs DDG first, Brave fallback (if DEEPDIVE_BRAVE_KEY).
+                                hackernews, stackexchange, pubmed, semanticscholar, and
+                                openalex need no key; github works keyless
+                                (DEEPDIVE_GITHUB_TOKEN raises the limit). 'auto' runs DDG
+                                first, Brave fallback (if DEEPDIVE_BRAVE_KEY).
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
@@ -170,6 +171,7 @@ Environment:
   DEEPDIVE_BASE_URL, DEEPDIVE_API_KEY, DEEPDIVE_MODEL, DEEPDIVE_SEARCH,
   DEEPDIVE_SEARXNG_URL, DEEPDIVE_BRAVE_KEY, DEEPDIVE_TAVILY_KEY, DEEPDIVE_EXA_KEY,
   DEEPDIVE_WIKIPEDIA_LANG, DEEPDIVE_GITHUB_TOKEN, DEEPDIVE_STACKEXCHANGE_SITE,
+  DEEPDIVE_S2_KEY, DEEPDIVE_OPENALEX_MAILTO,
   DEEPDIVE_MAX_SOURCES, DEEPDIVE_FETCH_TIMEOUT_MS, DEEPDIVE_HEADED,
   DEEPDIVE_DEEP_ROUNDS, DEEPDIVE_CONCURRENCY, DEEPDIVE_NO_CACHE,
   DEEPDIVE_CACHE_DIR, DEEPDIVE_CACHE_TTL_MS, DEEPDIVE_JSON, DEEPDIVE_VERBOSE, DEEPDIVE_TLDR,
