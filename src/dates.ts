@@ -2,11 +2,11 @@
 // so the source table can annotate recency and the synthesizer can weigh fresh
 // sources over stale ones. Pure over the HTML string; no DOM, no deps.
 //
-// Precedence (first valid wins): JSON-LD datePublished → publication-oriented
-// <meta> tags → <time datetime> → JSON-LD dateModified → modified <meta> tags.
-// A "published" date is preferred over "modified" everywhere because the
-// question deepdive answers is usually "how current is this claim", and the
-// original publication is the honest answer to that.
+// Precedence (first valid wins): JSON-LD datePublished -> publication-oriented
+// <meta> tags -> <time datetime> -> JSON-LD dateModified -> modified <meta>
+// tags. "published" beats "modified" everywhere because the question deepdive
+// answers is usually "how current is this claim", and the original publication
+// is the honest answer to that.
 
 // Returns the published date as epoch milliseconds, or undefined when no
 // trustworthy date is present. Dates outside a sane range (before 1990 or more
@@ -26,10 +26,9 @@ export function extractPublishedDate(
     if (hit) candidates.push(hit);
   }
 
-  // First <time> element that carries a datetime attribute. Match the open
-  // tag with a single [^>]* (linear), then read the attr from the bounded
-  // attribute string — avoids the polynomial `[^>]*LITERAL[^>]*` backtracking
-  // shape on adversarial page HTML.
+  // First <time> element that carries a datetime attribute. Match the open tag
+  // with a single linear [^>]*, then read the attr from the bounded attribute
+  // string, so adversarial HTML can't trigger polynomial backtracking.
   const timeRe = /<time\b([^>]*)>/gi;
   let tm: RegExpExecArray | null;
   while ((tm = timeRe.exec(html)) !== null) {
@@ -77,8 +76,8 @@ const MODIFIED_META_KEYS = [
   "lastmod",
 ];
 
-// Exported for unit tests. Parses every <meta> into a key→content map, keyed by
-// the lowercased name/property/itemprop. First occurrence of a key wins.
+// Exported for unit tests. Parses every <meta> into a key->content map, keyed
+// by the lowercased name/property/itemprop. First occurrence of a key wins.
 export function metaTags(html: string): Map<string, string> {
   const out = new Map<string, string>();
   const re = /<meta\b([^>]*?)\/?>/gi;
@@ -104,22 +103,36 @@ function attr(attrs: string, name: string): string | undefined {
 // Exported for unit tests. Pulls datePublished / dateModified out of any
 // JSON-LD <script> block, walking arrays and @graph. Malformed JSON is skipped.
 export function jsonLdDates(html: string): { published?: string; modified?: string } {
-  // Match every <script>…</script> with a single linear [^>]* for the open
-  // tag, then test the bounded attribute string for the ld+json type — this
-  // avoids the polynomial-backtracking `[^>]*type=…[^>]*>` shape that ReDoS on
-  // adversarial page HTML.
-  // The close tag matches every form a browser treats as </script> — bare,
-  // trailing whitespace, or ignored junk (`</script foo>`, `</script\n bar>`) —
-  // so no variant can slip a block past the matcher (CodeQL js/bad-tag-filter),
-  // without over-matching `</scriptx>`.
-  const re = /<script\b([^>]*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi;
-  let m: RegExpExecArray | null;
   const result: { published?: string; modified?: string } = {};
-  while ((m = re.exec(html)) !== null) {
-    if (!/type\s*=\s*["']application\/ld\+json["']/i.test(m[1])) continue;
+  // Match only the OPEN tag with a regex (single, linear [^>]*), then find the
+  // matching close with indexOf. A single regex spanning to the close tag can't
+  // be both complete (handle `</script foo>`) and linear — the literal-then-
+  // class shape backtracks polynomially on adversarial HTML (CodeQL). indexOf
+  // is linear and accepts every close-tag variant a browser does.
+  const openRe = /<script\b([^>]*)>/gi;
+  const typeRe = /type\s*=\s*["']application\/ld\+json["']/i;
+  // Lowercase once, not per close-tag scan — recomputing it inside the loop
+  // turns the whole pass O(n²) on a page with many <script> tags.
+  const lower = html.toLowerCase();
+  let m: RegExpExecArray | null;
+  // Real pages carry a handful of JSON-LD blocks near the top; cap the number
+  // of <script> tags inspected so a malformed page with thousands of unclosed
+  // tags can't drive the close-tag scan into O(n²).
+  let scanned = 0;
+  while ((m = openRe.exec(html)) !== null) {
+    if (++scanned > 256) break;
+    const contentStart = m.index + m[0].length;
+    const closeStart = findScriptClose(html, lower, contentStart);
+    if (closeStart !== -1) {
+      const gt = html.indexOf(">", closeStart + 8);
+      openRe.lastIndex = gt === -1 ? html.length : gt + 1;
+    }
+    if (!typeRe.test(m[1])) continue;
+    const body =
+      closeStart === -1 ? html.slice(contentStart) : html.slice(contentStart, closeStart);
     let data: unknown;
     try {
-      data = JSON.parse(m[2].trim());
+      data = JSON.parse(body.trim());
     } catch {
       continue;
     }
@@ -127,6 +140,22 @@ export function jsonLdDates(html: string): { published?: string; modified?: stri
     if (result.published) break; // best signal found
   }
   return result;
+}
+
+// Linear scan for the START index of the next `</script…>` close tag at or
+// after `from`. Accepts `</script>`, `</script >`, `</script foo>` — every form
+// a browser treats as a script end tag — but not `</scriptx>`. Returns -1 when
+// no close tag exists.
+function findScriptClose(html: string, lower: string, from: number): number {
+  let i = lower.indexOf("</script", from);
+  while (i !== -1) {
+    const after = html[i + 8];
+    if (after === ">" || after === "/" || after === undefined || /\s/.test(after)) {
+      return i;
+    }
+    i = lower.indexOf("</script", i + 8);
+  }
+  return -1;
 }
 
 function walk(node: unknown, out: { published?: string; modified?: string }): void {
