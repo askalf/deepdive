@@ -84,9 +84,15 @@ function renderSourcesHtml(record: SessionRecord): string {
   const items = record.sources
     .map((s) => {
       const date = new Date(s.fetchedAt);
-      const dateStr = Number.isNaN(date.getTime())
+      const fetched = Number.isNaN(date.getTime())
         ? ""
-        : ` <span class="fetched">fetched ${date.toISOString().slice(0, 10)}</span>`;
+        : `fetched ${date.toISOString().slice(0, 10)}`;
+      const pub =
+        typeof s.publishedAt === "number"
+          ? `published ${new Date(s.publishedAt).toISOString().slice(0, 10)}`
+          : "";
+      const metaBits = [pub, fetched].filter(Boolean).join(" · ");
+      const dateStr = metaBits ? ` <span class="fetched">${metaBits}</span>` : "";
       const safeUrl = escapeHtml(s.url);
       const label = escapeHtml(oneLine(s.title)) || safeUrl;
       const safeHref = isSafeHref(s.url) ? safeUrl : "#";

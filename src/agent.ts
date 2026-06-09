@@ -33,6 +33,7 @@ import {
   looksLikePdf,
 } from "./pdf.js";
 import { ingestLocalPaths } from "./local.js";
+import { extractPublishedDate } from "./dates.js";
 import { classifyUrl, type DomainFilter } from "./domain-filter.js";
 import type { PageCache } from "./cache.js";
 import { runConcurrent } from "./concurrency.js";
@@ -102,6 +103,9 @@ export interface AgentConfig {
   // override case (DEEPDIVE_PRICE_INPUT_PER_MTOK / _OUTPUT_PER_MTOK).
   // Defaults to undefined — the price table covers known models.
   env?: Record<string, string | undefined>;
+  // v0.14.0 — when true, the synthesizer leads with a one-paragraph TL;DR.
+  // Opt-in (CLI --tldr); default off keeps output identical to v0.13.
+  tldr?: boolean;
   onEvent?: (event: AgentEvent) => void;
   // Fires for each SSE token emitted by the synthesizer. When set, the agent
   // uses the streaming LLM path for synthesize() calls. CLI callers enable
@@ -434,11 +438,17 @@ export async function runAgent(
           title = f.page.title || f.candidate.title;
         }
 
+        // Recency signal: try to recover the page's publication date from its
+        // HTML (JSON-LD / meta / <time>). PDFs and cache hits without html
+        // simply yield undefined — additive, never blocks keeping the source.
+        const publishedAt = isPdf ? undefined : extractPublishedDate(f.page.html);
+
         keptSources.push({
           id: keptSources.length + 1,
           url: f.page.finalUrl || f.page.url,
           title,
           fetchedAt: f.page.fetchedAt,
+          ...(publishedAt !== undefined ? { publishedAt } : {}),
           content,
         });
       }
@@ -451,14 +461,11 @@ export async function runAgent(
       const tokenSink = config.onSynthesizeToken
         ? (chunk: string) => config.onSynthesizeToken!(chunk, round)
         : undefined;
-      answer = await synthesize(
-        question,
-        keptSources,
-        stageLLM.synth,
-        signal,
-        tokenSink,
-        usageSinkFor("synth", round),
-      );
+      answer = await synthesize(question, keptSources, stageLLM.synth, signal, {
+        onToken: tokenSink,
+        onUsage: usageSinkFor("synth", round),
+        tldr: config.tldr,
+      });
       emit(config, { type: "synthesize.done", round });
 
       const roundTrace: RoundTrace = {

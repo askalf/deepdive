@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — answer quality: published dates, recency-aware synthesis, confidence, TL;DR
+
+- **Published-date extraction** (`src/dates.ts`) — recover a page's publication date from its rendered HTML (JSON-LD `datePublished` → publication `<meta>` tags → `<time datetime>` → modified-date fallbacks), range-validated to reject parse noise. Surfaced on the source row (`fetched … · published …`), in the HTML export, and in `--json` as `publishedAt`. Sources without a date degrade silently.
+- **Recency-aware synthesis** — the synthesizer's source packet now carries `(published YYYY-MM-DD)` per source, and the system prompt tells it to prefer the more recent source when sources conflict. No behavior change when no dates are present.
+- **Confidence signal** (`src/confidence.ts`) — a deterministic coverage read printed alongside the cost line (`confidence · high · 11 sources · 18/18 citations supported`) and included in `--json` as `confidence`. `low` flags a thin source base, an uncited answer, or weakly-supported citations. Suppressed by `--no-cost`. Explicitly a sanity read, not a correctness claim.
+- **`--tldr`** (env `DEEPDIVE_TLDR`) — opt-in: lead the answer with a one-paragraph, still-cited TL;DR before the full detail. Output is identical to before when unset.
+
+`Source` gains an optional `publishedAt`. `synthesize()` now takes an options object (`{ onToken, onUsage, tldr }`) instead of trailing positional callbacks. New library exports: `extractPublishedDate`, `assessConfidence`, `formatConfidenceLine`. 21 new tests; date extractor verified against live pages.
+
 ### Added — three keyless-friendly search adapters + adapter contract doc
 
 - **`--search=wikipedia`** (`src/search/wikipedia.ts`) — MediaWiki search API, no key. Encyclopedia-first retrieval for definitional/factual sub-queries. Language via `DEEPDIVE_WIKIPEDIA_LANG` (default `en`). Search-match snippets are tag-stripped and entity-decoded; kept sources are canonical `/wiki/<Title>` URLs.
