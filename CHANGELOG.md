@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — three keyless-friendly search adapters + adapter contract doc
+
+- **`--search=wikipedia`** (`src/search/wikipedia.ts`) — MediaWiki search API, no key. Encyclopedia-first retrieval for definitional/factual sub-queries. Language via `DEEPDIVE_WIKIPEDIA_LANG` (default `en`). Search-match snippets are tag-stripped and entity-decoded; kept sources are canonical `/wiki/<Title>` URLs.
+- **`--search=arxiv`** (`src/search/arxiv.ts`) — arXiv Atom API, no key. Research-paper/preprint search; kept sources are abstract pages (the PDF path handles linked PDFs). Hand-rolled Atom parser, https-forced, arxiv.org-only.
+- **`--search=github`** (`src/search/github.ts`) — GitHub repository search. Works keyless (60 req/hr); `DEEPDIVE_GITHUB_TOKEN` raises the limit. Snippet carries the repo description + star count.
+- **`docs/search-adapter.md`** — the `SearchAdapter` contract (URL/limit/rank/error/timeout/no-deps rules) plus a copy-paste scaffold, so community adapter PRs have a spec to build against. README "Search adapters" table and CLI `--help` updated.
+
+All three reuse `searchTimeoutSignal` for the hardened per-request timeout and keep their response→`SearchResult[]` transform in an exported pure function. 21 new tests; verified against the live APIs.
+
 ### Added — research workspace: export, diff, session lifecycle
 
 Your saved sessions are a local research corpus you own. Three commands turn that history into a workspace hosted tools structurally can't offer (your data never left your machine, so it's there to revisit):
