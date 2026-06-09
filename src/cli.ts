@@ -39,7 +39,9 @@ import {
   deleteSession,
   pruneSessions,
   parseDuration,
+  loadAllSessions,
 } from "./sessions.js";
+import { aggregateSessionStats, renderStats } from "./stats.js";
 import { renderHtmlReport } from "./html-export.js";
 import { assessConfidence, formatConfidenceLine } from "./confidence.js";
 import { loadConfigFile, fileConfigToEnv } from "./config-file.js";
@@ -66,7 +68,8 @@ const USAGE = `deepdive — local research agent
 Usage:
   deepdive "<question>" [flags]            Run the research agent
   deepdive doctor [flags]                  Health check — paste the output when filing issues
-  deepdive sessions ls                     List saved sessions, newest first
+  deepdive sessions ls [<filter>]          List saved sessions (optional question substring)
+  deepdive stats                           Aggregate cost / sources / models across sessions
   deepdive show <id>                       Print a saved session's markdown answer
   deepdive resume <id> [<question>]        Re-synthesize against a saved session's
                                            sources (cheap iteration; no re-fetching)
@@ -211,6 +214,7 @@ const SUBCOMMAND_VERBS = new Set([
   "completion",
   "search",
   "open",
+  "stats",
 ]);
 
 // Exported for unit tests.
@@ -631,6 +635,9 @@ async function main(argv: string[]): Promise<number> {
   if (parsed.question === "open") {
     return await openCommand(parsed);
   }
+  if (parsed.question === "stats") {
+    return await statsCommand(parsed);
+  }
   if (!parsed.question) {
     process.stderr.write(`deepdive: missing question.\n\n${USAGE}`);
     return 2;
@@ -1026,7 +1033,7 @@ async function sessionsCommand(parsed: ParsedArgs): Promise<number> {
   const sub = parsed.extras[0] ?? "ls";
   switch (sub) {
     case "ls":
-      return await sessionsLs(config);
+      return await sessionsLs(config, parsed.extras[1]);
     case "rm":
       return await sessionsRm(parsed, config);
     case "prune":
@@ -1041,13 +1048,43 @@ async function sessionsCommand(parsed: ParsedArgs): Promise<number> {
 
 async function sessionsLs(
   config: import("./config.js").RuntimeConfig,
+  filter?: string,
 ): Promise<number> {
   const { sessions, bad } = await listSessions({ dir: config.sessions.dir });
+  // Optional case-insensitive substring filter on the question text.
+  const needle = filter?.toLowerCase();
+  const shown = needle
+    ? sessions.filter((s) => s.question.toLowerCase().includes(needle))
+    : sessions;
   if (config.jsonOutput) {
-    process.stdout.write(JSON.stringify({ sessions, bad }, null, 2) + "\n");
+    process.stdout.write(JSON.stringify({ sessions: shown, bad }, null, 2) + "\n");
     return 0;
   }
-  process.stdout.write(renderSessionsList(sessions) + "\n");
+  if (needle && shown.length === 0) {
+    process.stdout.write(`(no sessions match "${filter}")\n`);
+    return 0;
+  }
+  process.stdout.write(renderSessionsList(shown) + "\n");
+  if (bad.length > 0) {
+    process.stderr.write(
+      `\n(${bad.length} session file${bad.length === 1 ? "" : "s"} could not be parsed)\n`,
+    );
+  }
+  return 0;
+}
+
+// `deepdive stats [--json]` — aggregate insights across all saved sessions:
+// run count, total calculated cost, sources/rounds, per-model breakdown, and
+// the date span.
+async function statsCommand(parsed: ParsedArgs): Promise<number> {
+  const config = resolveConfig(parsed.flags, process.env);
+  const { records, bad } = await loadAllSessions({ dir: config.sessions.dir });
+  const stats = aggregateSessionStats(records);
+  if (config.jsonOutput) {
+    process.stdout.write(JSON.stringify({ stats, bad }, null, 2) + "\n");
+    return 0;
+  }
+  process.stdout.write(renderStats(stats) + "\n");
   if (bad.length > 0) {
     process.stderr.write(
       `\n(${bad.length} session file${bad.length === 1 ? "" : "s"} could not be parsed)\n`,

@@ -498,7 +498,8 @@ session  2026-05-07_134509_5959f102  (deepdive resume 2026-05-07_134509_5959f102
 Four subcommands operate on saved sessions:
 
 ```bash
-deepdive sessions ls                          # newest first; id, age, source/round counts, question
+deepdive sessions ls [<filter>]               # newest first; optional case-insensitive question filter
+deepdive stats                                # totals: cost, sources, rounds, per-model breakdown, date span
 deepdive sessions rm <id> [<id>...]           # delete one or more sessions
 deepdive sessions prune --older-than=30d      # delete old sessions (and/or --keep=N; --dry-run to preview)
 deepdive show <id>                            # re-print the original markdown answer

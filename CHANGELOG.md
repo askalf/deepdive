@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — `stats` + `sessions ls` filter
+
+- **`deepdive stats [--json]`** (`src/stats.ts`) — aggregate insights across all saved sessions: run count, total calculated cost, sources fetched + avg/session, total rounds + deep-run count, a per-model breakdown (runs + cost), and the date span. New pure `aggregateSessionStats` / `renderStats` (exported) and a `loadAllSessions` reader.
+- **`deepdive sessions ls [<filter>]`** — optional case-insensitive substring filter on the question text, so a large history stays navigable.
+
 ## [0.15.0] - 2026-06-09
 
 ### Added — `search` and `open` convenience commands
