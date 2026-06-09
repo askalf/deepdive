@@ -108,7 +108,9 @@ export function jsonLdDates(html: string): { published?: string; modified?: stri
   // tag, then test the bounded attribute string for the ld+json type — this
   // avoids the polynomial-backtracking `[^>]*type=…[^>]*>` shape that ReDoS on
   // adversarial page HTML.
-  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  // `<\/script\s*>` tolerates `</script >` / `</script\n>` so a whitespace
+  // variant can't slip a block past the matcher (CodeQL js/bad-tag-filter).
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
   let m: RegExpExecArray | null;
   const result: { published?: string; modified?: string } = {};
   while ((m = re.exec(html)) !== null) {
