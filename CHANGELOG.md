@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-09
+
 ### Added — config file, named profiles, shell completion
 
 - **`~/.deepdive/config.json`** (override path with `DEEPDIVE_CONFIG`) — persist defaults so you stop retyping `--base-url` / `--model` / `--search`. Friendly keys mirror the flags (`model`, `search`, `deep`, `denyDomain`, `tldr`, … and `"cache": false`-style toggles), plus an optional `profiles` map and `defaultProfile`. Implemented by translating the file to the `DEEPDIVE_*` env strings `resolveConfig` already reads and layering them *under* the real environment — so `resolveConfig` is untouched and precedence is **CLI flags > env vars > profile > config-file base > defaults**.
