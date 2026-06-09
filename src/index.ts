@@ -69,6 +69,12 @@ export { BUILTIN_PROFILES, resolveProfile, listProfiles } from "./profiles.js";
 export { completionScript, type Shell } from "./completion.js";
 export { browserOpenCommand, type OpenCommand } from "./open.js";
 export {
+  contentShingles,
+  jaccard,
+  findNearDuplicate,
+  DEFAULT_NEAR_DUPE_THRESHOLD,
+} from "./similarity.js";
+export {
   aggregateSessionStats,
   renderStats,
   type SessionStats,

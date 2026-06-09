@@ -68,6 +68,7 @@ const KEY_MAP: Record<string, { env: string; kind: Kind }> = {
   allowDomain: { env: "DEEPDIVE_ALLOW_DOMAIN", kind: "list" },
   denyDomain: { env: "DEEPDIVE_DENY_DOMAIN", kind: "list" },
   since: { env: "DEEPDIVE_SINCE", kind: "string" },
+  dedupeThreshold: { env: "DEEPDIVE_DEDUPE_THRESHOLD", kind: "number" },
   include: { env: "DEEPDIVE_INCLUDE", kind: "list" },
   tldr: { env: "DEEPDIVE_TLDR", kind: "bool" },
   strictCites: { env: "DEEPDIVE_STRICT_CITES", kind: "bool" },
@@ -76,6 +77,7 @@ const KEY_MAP: Record<string, { env: string; kind: Kind }> = {
   // Inverted toggles: the friendly key is the positive feature, set false to
   // disable. e.g. {"cache": false} → DEEPDIVE_NO_CACHE=1.
   cache: { env: "DEEPDIVE_NO_CACHE", kind: "boolInverted" },
+  dedupe: { env: "DEEPDIVE_NO_DEDUPE", kind: "boolInverted" },
   verifyCites: { env: "DEEPDIVE_NO_VERIFY_CITES", kind: "boolInverted" },
   cost: { env: "DEEPDIVE_NO_COST", kind: "boolInverted" },
   sessions: { env: "DEEPDIVE_NO_SESSIONS", kind: "boolInverted" },

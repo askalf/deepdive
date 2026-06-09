@@ -194,6 +194,8 @@ Two signals that help you read a report at a glance.
 deepdive "best way to deploy a node app in 2026" --since=365d --deep
 ```
 
+**Near-duplicate dedup.** The same article syndicated across hosts (wire stories, mirrors, AMP copies) survives URL-level dedupe but wastes a source slot and pads the synth context with repeated text. deepdive drops a fetched source whose extracted content is ≥ 90% shingle-similar (word 5-gram Jaccard) to one already kept — `near-duplicate` in `--verbose`. The 0.9 default only fires on genuine copies; two different articles on the same topic typically score under 0.3. Tune with `--dedupe-threshold=<0..1>` or turn it off with `--no-dedupe` (`DEEPDIVE_NO_DEDUPE=1`). Sources you brought deliberately (`--include`, `continue`) are never dropped — they act as dedupe anchors instead, so a re-search can't re-add a copy of what you already have.
+
 **Confidence.** After each run, alongside the cost line, deepdive prints a one-line coverage read:
 
 ```

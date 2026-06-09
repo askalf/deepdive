@@ -141,6 +141,9 @@ test("agent: single-pass mode runs plan → search → fetch → synth", async (
       maxWordsPerSource: 2000,
       deepRounds: 0,
       concurrency: 2,
+      // Mock pages share identical LOREM content; this test exercises the
+      // pipeline mechanics, not near-dup dedup (covered by its own tests).
+      dedupeNearDupes: false,
       browserFactory: mockBrowserFactory(pages, tracker),
     });
 
@@ -187,6 +190,7 @@ test("agent: caps the fetch batch at headroom, not candidates found (F1 regressi
       maxWordsPerSource: 2000,
       deepRounds: 0,
       concurrency: 4,
+      dedupeNearDupes: false, // identical mock content; testing batch-cap mechanics
       browserFactory: mockBrowserFactory(pages, tracker),
     });
 
@@ -234,6 +238,7 @@ test("agent: --deep runs critic + follow-up round", async () => {
       maxWordsPerSource: 2000,
       deepRounds: 1,
       concurrency: 2,
+      dedupeNearDupes: false, // identical mock content; testing the critic loop
       browserFactory: mockBrowserFactory(pages),
     });
 
@@ -377,6 +382,7 @@ test("agent: maxSources caps the kept-source count", async () => {
       maxWordsPerSource: 2000,
       deepRounds: 0,
       concurrency: 2,
+      dedupeNearDupes: false, // identical mock content; testing the source cap
       browserFactory: mockBrowserFactory(pages),
     });
     assert.equal(result.sources.length, 3);
@@ -1045,6 +1051,7 @@ test("agent: --since drops sources dated before the cutoff, keeps fresh + datele
       deepRounds: 0,
       concurrency: 2,
       sinceMs: Date.UTC(2024, 0, 1),
+      dedupeNearDupes: false, // fresh + nodate share LOREM; testing --since only
       browserFactory: mockBrowserFactory(pages),
       onEvent: (e) => {
         if (e.type === "fetch.skipped") skipped.push(e);
@@ -1055,6 +1062,93 @@ test("agent: --since drops sources dated before the cutoff, keeps fresh + datele
     assert.equal(skipped.length, 1);
     assert.equal(skipped[0].reason, "stale");
     assert.equal(skipped[0].url, "https://ex.com/old");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: near-duplicate content on a second host is dropped (syndication)", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1][2].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const DIFFERENT =
+    "An entirely different article about container orchestration, scheduling pods onto " +
+    "nodes, rolling deployments, and the reconciliation loops that keep desired state " +
+    "matched to observed state across a fleet of machines in production clusters today. " +
+    "It continues with several more sentences describing admission controllers, taints and " +
+    "tolerations, horizontal autoscaling signals, and the etcd consensus layer underneath, " +
+    "comfortably clearing the fifty-word minimum that the extractor enforces for web sources.";
+  const search = mockSearch({
+    q1: [
+      { url: "https://original.com/story", title: "Original", snippet: "" },
+      { url: "https://mirror.net/story", title: "Mirror", snippet: "" },
+      { url: "https://other.org/different", title: "Different", snippet: "" },
+    ],
+  });
+  const pages = {
+    "https://original.com/story": { text: LOREM, title: "Original" },
+    "https://mirror.net/story": { text: LOREM, title: "Mirror" }, // identical content, different host
+    "https://other.org/different": { text: DIFFERENT, title: "Different" },
+  };
+  const skipped = [];
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 1, // deterministic keep order
+      browserFactory: mockBrowserFactory(pages),
+      onEvent: (e) => {
+        if (e.type === "fetch.skipped") skipped.push(e);
+      },
+    });
+    assert.equal(result.sources.length, 2, "mirror dropped, original + different kept");
+    const urls = result.sources.map((s) => s.url).sort();
+    assert.deepEqual(urls, ["https://original.com/story", "https://other.org/different"]);
+    assert.equal(skipped.length, 1);
+    assert.equal(skipped[0].reason, "near-duplicate");
+    assert.equal(skipped[0].url, "https://mirror.net/story");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: dedupeNearDupes=false keeps the syndicated copy", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1][2].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const search = mockSearch({
+    q1: [
+      { url: "https://original.com/story", title: "Original", snippet: "" },
+      { url: "https://mirror.net/story", title: "Mirror", snippet: "" },
+    ],
+  });
+  const pages = {
+    "https://original.com/story": { text: LOREM, title: "Original" },
+    "https://mirror.net/story": { text: LOREM, title: "Mirror" },
+  };
+  try {
+    const result = await runAgent("q", {
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search,
+      browser: { headless: true, timeoutMs: 5000, maxBytes: 1_000_000 },
+      resultsPerQuery: 5,
+      maxSources: 12,
+      maxWordsPerSource: 2000,
+      deepRounds: 0,
+      concurrency: 1,
+      dedupeNearDupes: false,
+      browserFactory: mockBrowserFactory(pages),
+    });
+    assert.equal(result.sources.length, 2, "both kept when dedupe is off");
   } finally {
     await stopServer(server);
   }

@@ -42,6 +42,9 @@ export interface RuntimeConfig {
   maxCostUsd?: number;
   // v0.14.0 — lead the answer with a one-paragraph TL;DR. Opt-in.
   tldr: boolean;
+  // v0.17.0 — near-duplicate dedup of fetched sources (default on).
+  dedupeNearDupes: boolean;
+  nearDupeThreshold: number;
   // v0.15.0 — recency cutoff (epoch ms). Sources dated before this are
   // dropped. Undefined = no recency filter. Set via --since / DEEPDIVE_SINCE.
   sinceMs?: number;
@@ -87,6 +90,8 @@ export interface CLIFlags {
   verbose?: boolean;
   tldr?: boolean;
   since?: string;
+  noDedupe?: boolean;
+  dedupeThreshold?: number;
   // v0.11.0 — already-parsed budget cap in USD. CLI parser converts
   // "--max-cost=$0.50" / "$5" / "0.25" into a number; resolveConfig
   // accepts the parsed value (parseMaxCost lives in budget.ts and the
@@ -261,6 +266,11 @@ export function resolveConfig(
   const tldr = flags.tldr ?? env.DEEPDIVE_TLDR === "1";
   const sinceRaw = flags.since ?? env.DEEPDIVE_SINCE;
   const sinceMs = sinceRaw ? resolveSince(sinceRaw) : undefined;
+  const dedupeNearDupes = !(flags.noDedupe ?? env.DEEPDIVE_NO_DEDUPE === "1");
+  const nearDupeThreshold =
+    flags.dedupeThreshold ??
+    parseUnitFloat(env.DEEPDIVE_DEDUPE_THRESHOLD) ??
+    0.9;
 
   // v0.11.0 — budget cap. Flag takes a pre-parsed number from cli.ts
   // (which uses parseMaxCost on the raw string). Env var is parsed here.
@@ -308,6 +318,8 @@ export function resolveConfig(
     verbose,
     maxCostUsd,
     tldr,
+    dedupeNearDupes,
+    nearDupeThreshold,
     sinceMs,
     sinceRaw,
   };

@@ -147,6 +147,10 @@ Flags:
                                 date (2024, 2024-06, 2024-06-15) or a duration
                                 (30d, 12h, 2w = that long ago). Sources with no
                                 detectable date are kept. Env: DEEPDIVE_SINCE.
+  --no-dedupe                   Keep near-duplicate sources (syndicated copies of
+                                the same article). Default: drop them.
+  --dedupe-threshold=<0..1>     Similarity above which a source counts as a
+                                duplicate. Default: 0.9. Env: DEEPDIVE_DEDUPE_THRESHOLD.
   --api-format=<anthropic|openai>
                                 Wire format for the LLM endpoint. Default:
                                 auto-detected from --base-url (api.openai.com,
@@ -180,6 +184,7 @@ Environment:
   DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK,
   DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES,
   DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_SINCE, DEEPDIVE_API_FORMAT,
+  DEEPDIVE_NO_DEDUPE, DEEPDIVE_DEDUPE_THRESHOLD,
   DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR, DEEPDIVE_CONFIG
 
 Config file:
@@ -272,6 +277,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags.tldr = true;
       continue;
     }
+    if (a === "--no-dedupe") {
+      flags.noDedupe = true;
+      continue;
+    }
     if (a === "--narrate") {
       flags.narrate = true;
       continue;
@@ -356,6 +365,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "cite-min-recall":
           flags.citeMinRecall = parseUnitFloat(value);
+          break;
+        case "dedupe-threshold":
+          {
+            const parsed = parseUnitFloat(value);
+            if (parsed === undefined) {
+              throw new Error(
+                `--dedupe-threshold must be a number in [0, 1] (got: ${value})`,
+              );
+            }
+            flags.dedupeThreshold = parsed;
+          }
           break;
         case "pdf-max-pages":
           flags.pdfMaxPages = parsePositiveInt(value);
@@ -858,6 +878,8 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
         domainFilter: config.domainFilter,
         tldr: config.tldr,
         sinceMs: config.sinceMs,
+        dedupeNearDupes: config.dedupeNearDupes,
+        nearDupeThreshold: config.nearDupeThreshold,
         env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
