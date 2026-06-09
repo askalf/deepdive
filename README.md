@@ -188,6 +188,12 @@ Two signals that help you read a report at a glance.
 
 **Published dates.** When deepdive fetches a page, it tries to recover the page's publication date from the rendered HTML — JSON-LD `datePublished`, `<meta property="article:published_time">` and friends, or a `<time datetime>` element. When it finds one, the source row shows it (`fetched 2026-05-07 · published 2024-03-15`), the HTML export shows it, the JSON carries it as `publishedAt`, **and** the synthesizer sees it — so when sources disagree it can prefer the more recent one and flag claims that come from an older page. Pages that don't expose a date (many SPAs) simply don't get the annotation; nothing breaks.
 
+**Recency filter.** Pass `--since` (or `DEEPDIVE_SINCE`) to drop stale sources outright — an absolute date (`--since=2024`, `--since=2024-06-15`) or a duration meaning "that long ago" (`--since=30d`, `--since=2w`). A fetched page whose detected publication date is before the cutoff is skipped (`stale` in `--verbose`); pages with no detectable date are kept, so a missing-metadata page is never penalized. Useful for fast-moving topics where a 2019 blog post is worse than no answer.
+
+```bash
+deepdive "best way to deploy a node app in 2026" --since=365d --deep
+```
+
 **Confidence.** After each run, alongside the cost line, deepdive prints a one-line coverage read:
 
 ```

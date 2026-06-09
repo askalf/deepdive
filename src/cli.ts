@@ -132,6 +132,10 @@ Flags:
                                 exclusively (e.g. github.com,docs.anthropic.com).
   --deny-domain=<list>          Comma-separated hostname suffixes to drop
                                 (e.g. pinterest.com,quora.com).
+  --since=<date|duration>       Drop sources published before this — an absolute
+                                date (2024, 2024-06, 2024-06-15) or a duration
+                                (30d, 12h, 2w = that long ago). Sources with no
+                                detectable date are kept. Env: DEEPDIVE_SINCE.
   --api-format=<anthropic|openai>
                                 Wire format for the LLM endpoint. Default:
                                 auto-detected from --base-url (api.openai.com,
@@ -163,7 +167,7 @@ Environment:
   DEEPDIVE_NO_VERIFY_CITES, DEEPDIVE_STRICT_CITES, DEEPDIVE_CITE_MIN_RECALL,
   DEEPDIVE_NO_COST, DEEPDIVE_PRICE_INPUT_PER_MTOK, DEEPDIVE_PRICE_OUTPUT_PER_MTOK,
   DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES,
-  DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_API_FORMAT,
+  DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_SINCE, DEEPDIVE_API_FORMAT,
   DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR, DEEPDIVE_CONFIG
 
 Config file:
@@ -372,6 +376,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "profile":
           flags.profile = value;
+          break;
+        case "since":
+          flags.since = value;
           break;
         case "format":
           flags.format = value.toLowerCase();
@@ -676,6 +683,15 @@ interface RunResearchOptions {
 
 async function runResearch(opts: RunResearchOptions): Promise<number> {
   const { question, parsed, config, preKept, parentId } = opts;
+  // A --since value that was supplied but didn't parse is a user error — fail
+  // loud rather than silently running with no recency filter.
+  if (config.sinceRaw && config.sinceMs === undefined) {
+    process.stderr.write(
+      `deepdive: --since must be a date (2024, 2024-06, 2024-06-15) or a duration ` +
+        `(30d, 12h, 2w); got: ${config.sinceRaw}\n`,
+    );
+    return 2;
+  }
   const search = await resolveSearchAdapter(config.searchAdapter, process.env);
   const cache = config.cache.enabled
     ? createCache({ dir: config.cache.dir, ttlMs: config.cache.ttlMs })
@@ -725,6 +741,7 @@ async function runResearch(opts: RunResearchOptions): Promise<number> {
         include: config.include,
         domainFilter: config.domainFilter,
         tldr: config.tldr,
+        sinceMs: config.sinceMs,
         env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");

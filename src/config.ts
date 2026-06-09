@@ -9,6 +9,7 @@ import { parseDomainList, type DomainFilter } from "./domain-filter.js";
 import { detectApiFormat, type ApiFormat } from "./llm-format.js";
 import { defaultSessionsDir } from "./sessions.js";
 import { parseMaxCost } from "./budget.js";
+import { resolveSince } from "./dates.js";
 
 export interface RuntimeConfig {
   llm: LLMConfig;
@@ -41,6 +42,12 @@ export interface RuntimeConfig {
   maxCostUsd?: number;
   // v0.14.0 — lead the answer with a one-paragraph TL;DR. Opt-in.
   tldr: boolean;
+  // v0.15.0 — recency cutoff (epoch ms). Sources dated before this are
+  // dropped. Undefined = no recency filter. Set via --since / DEEPDIVE_SINCE.
+  sinceMs?: number;
+  // The raw --since value (if any), so the CLI can distinguish "not set" from
+  // "set but unparseable" and error on the latter.
+  sinceRaw?: string;
 }
 
 export interface CLIFlags {
@@ -79,6 +86,7 @@ export interface CLIFlags {
   noStream?: boolean;
   verbose?: boolean;
   tldr?: boolean;
+  since?: string;
   // v0.11.0 — already-parsed budget cap in USD. CLI parser converts
   // "--max-cost=$0.50" / "$5" / "0.25" into a number; resolveConfig
   // accepts the parsed value (parseMaxCost lives in budget.ts and the
@@ -251,6 +259,8 @@ export function resolveConfig(
   const streamEnabled = !streamOptOut && !jsonOutput;
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
   const tldr = flags.tldr ?? env.DEEPDIVE_TLDR === "1";
+  const sinceRaw = flags.since ?? env.DEEPDIVE_SINCE;
+  const sinceMs = sinceRaw ? resolveSince(sinceRaw) : undefined;
 
   // v0.11.0 — budget cap. Flag takes a pre-parsed number from cli.ts
   // (which uses parseMaxCost on the raw string). Env var is parsed here.
@@ -298,6 +308,8 @@ export function resolveConfig(
     verbose,
     maxCostUsd,
     tldr,
+    sinceMs,
+    sinceRaw,
   };
 }
 

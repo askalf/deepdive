@@ -30,6 +30,7 @@ export {
   metaTags,
   jsonLdDates,
   toEpoch,
+  resolveSince,
 } from "./dates.js";
 export {
   assessConfidence,
