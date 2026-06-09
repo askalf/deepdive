@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-06-09
+
 ### Added — `--search=multi:<a>,<b>` fan-out
 
 - **Multi-adapter fan-out** (`src/search/multi.ts`) — `--search=multi:duckduckgo,wikipedia,arxiv` queries every listed adapter **concurrently**, interleaves results round-robin in adapter order, dedupes on the normalized URL, and re-ranks densely. Partial failures are tolerated (a throttled backend doesn't sink the round); it throws only when *every* sub-adapter failed, naming each failure. Sub-adapters resolve recursively (keys still required where applicable); nesting `multi:` is refused. Composite name (`multi(a,b)`) shows up in `doctor` and `search`. New exports: `MultiSearch`, `interleaveResults`.
