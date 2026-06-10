@@ -303,10 +303,12 @@ export function headingPlainText(s: string): string {
 // Exported for unit tests. Lowercase, non-alphanumeric runs → "-", trimmed.
 // Empty input falls back to "section" so an id is never blank.
 export function slugify(s: string): string {
-  const slug = s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  // Collapse every non-alphanumeric run to a single "-", so leading/trailing
+  // separators are at most one char each — trimmed with linear string ops
+  // rather than an anchored `-+` regex (which trips js/polynomial-redos).
+  let slug = s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  if (slug.startsWith("-")) slug = slug.slice(1);
+  if (slug.endsWith("-")) slug = slug.slice(0, -1);
   return slug || "section";
 }
 
