@@ -19,6 +19,10 @@ export interface MarkdownToHtmlOptions {
   // `<sup><a href="#<prefix><N>">N</a></sup>` so it links to the rendered
   // source list. When omitted, `[N]` renders as a plain `<sup>[N]</sup>`.
   citationAnchorPrefix?: string;
+  // When true, headings get a slug `id` (deduped with -2/-3 suffixes) so a
+  // table of contents — or any deep link — can target them. The slugs match
+  // what extractHeadings() produces for the same document.
+  headingIds?: boolean;
 }
 
 // Private-use sentinels that cannot occur in escaped source text. Used to
@@ -31,6 +35,7 @@ const PARK_CLOSE = String.fromCharCode(0xe001);
 export function markdownToHtml(md: string, opts: MarkdownToHtmlOptions = {}): string {
   const lines = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const blocks: string[] = [];
+  const slugger = opts.headingIds ? createSlugger() : undefined;
   let i = 0;
 
   while (i < lines.length) {
@@ -68,7 +73,9 @@ export function markdownToHtml(md: string, opts: MarkdownToHtmlOptions = {}): st
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       const level = heading[1].length;
-      blocks.push(`<h${level}>${renderInline(heading[2].trim(), opts)}</h${level}>`);
+      const text = heading[2].trim();
+      const idAttr = slugger ? ` id="${slugger(headingPlainText(text))}"` : "";
+      blocks.push(`<h${level}${idAttr}>${renderInline(text, opts)}</h${level}>`);
       i++;
       continue;
     }
@@ -267,4 +274,81 @@ export function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// ── Heading slugs / table of contents ───────────────────────────────────────
+
+export interface Heading {
+  level: number; // 1-6
+  text: string; // plain text (inline markup stripped)
+  slug: string; // matches the id markdownToHtml({headingIds:true}) emits
+}
+
+// Exported for unit tests. Strips the inline markup a heading can carry so the
+// slug (and TOC label) comes from the readable text: code ticks, emphasis
+// markers, links → their label, citation [N] runs dropped.
+export function headingPlainText(s: string): string {
+  return s
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)\s]+\)/g, "$1")
+    .replace(/(?:\[\d+\])+(?!\()/g, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1$2")
+    .replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Exported for unit tests. Lowercase, non-alphanumeric runs → "-", trimmed.
+// Empty input falls back to "section" so an id is never blank.
+export function slugify(s: string): string {
+  // Collapse every non-alphanumeric run to a single "-", so leading/trailing
+  // separators are at most one char each — trimmed with linear string ops
+  // rather than an anchored `-+` regex (which trips js/polynomial-redos).
+  let slug = s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  if (slug.startsWith("-")) slug = slug.slice(1);
+  if (slug.endsWith("-")) slug = slug.slice(0, -1);
+  return slug || "section";
+}
+
+// Stateful slug allocator: repeated headings get -2, -3, … suffixes. Both
+// markdownToHtml and extractHeadings walk headings in document order with a
+// fresh slugger, so the same document always yields the same ids.
+function createSlugger(): (text: string) => string {
+  const used = new Map<string, number>();
+  return (text: string) => {
+    const base = slugify(text);
+    const n = (used.get(base) ?? 0) + 1;
+    used.set(base, n);
+    return n === 1 ? base : `${base}-${n}`;
+  };
+}
+
+// Exported for the HTML export's table of contents. Walks the document's ATX
+// headings in order (skipping fenced code blocks, mirroring markdownToHtml's
+// block parsing) and returns level/text/slug for each.
+export function extractHeadings(md: string): Heading[] {
+  const lines = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const out: Heading[] = [];
+  const slugger = createSlugger();
+  let i = 0;
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    const fence = /^(```+|~~~+)/.exec(trimmed);
+    if (fence) {
+      const marker = fence[1];
+      i++;
+      while (i < lines.length && lines[i].trim() !== marker) i++;
+      i++;
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.*)$/.exec(lines[i]);
+    if (heading) {
+      const text = headingPlainText(heading[2].trim());
+      out.push({ level: heading[1].length, text, slug: slugger(text) });
+    }
+    i++;
+  }
+  return out;
 }
