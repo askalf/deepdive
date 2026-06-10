@@ -550,6 +550,8 @@ deepdive export 2026-05-07 --format=md                   # re-render the origina
 
 The markdown→HTML rendering is hand-rolled (`src/markdown.ts`) so the export adds **no runtime dependency** — same audit-it-in-an-afternoon guarantee as the rest of the tool. The HTML is produced from the saved session, so you can export a run you did weeks ago without re-spending a token.
 
+Long reports get a **table of contents** automatically (when the answer has 3+ section headings), with every heading carrying a stable anchor id — so you can deep-link a colleague straight to `report.html#pricing-changes`.
+
 To render *and* open it in one step, `deepdive open <id>` writes the HTML to a temp file (or `--out=<path>`) and launches your default browser — the file path is always printed, so it works on a headless box too.
 
 ---

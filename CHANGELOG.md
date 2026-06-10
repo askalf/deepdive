@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-06-09
+
+### Added — HTML export: heading anchors + table of contents
+
+- **Heading anchors** — `markdownToHtml` gains `headingIds`: headings get slug `id`s (lowercased, dashed, deduped with `-2`/`-3`; derived from the readable text with inline markup and `[N]` citations stripped). Off by default; the HTML export enables it, so deep links like `report.html#pricing-changes` work.
+- **Table of contents** — exported reports with 3+ `h2`/`h3` headings get a `<nav class="toc">` after the meta line, linking to the heading anchors (h3s indented). Short answers stay clean (no TOC). Labels are HTML-escaped.
+- New pure exports: `extractHeadings` (fence-aware, slug-consistent with `markdownToHtml`), `headingPlainText`, `slugify`.
+
 ## [0.18.0] - 2026-06-09
 
 ### Added — `--search=multi:<a>,<b>` fan-out

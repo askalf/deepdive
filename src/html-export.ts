@@ -9,7 +9,7 @@
 // zero runtime dependency.
 
 import type { SessionRecord } from "./sessions.js";
-import { markdownToHtml, escapeHtml } from "./markdown.js";
+import { markdownToHtml, escapeHtml, extractHeadings } from "./markdown.js";
 
 const CITATION_ANCHOR_PREFIX = "source-";
 
@@ -30,8 +30,10 @@ export function renderHtmlReport(
   const title = escapeHtml(oneLine(record.question)) || "deepdive report";
   const body = markdownToHtml(record.answer, {
     citationAnchorPrefix: CITATION_ANCHOR_PREFIX,
+    headingIds: true,
   });
   const meta = renderMetaLine(record);
+  const toc = renderToc(record.answer);
   const sources = renderSourcesHtml(record);
   const footer =
     opts.footer === undefined ? DEFAULT_FOOTER : opts.footer;
@@ -49,7 +51,7 @@ export function renderHtmlReport(
 <body>
 <main>
   <h1>${title}</h1>
-  ${meta}
+  ${meta}${toc}
   <article>
 ${body}
   </article>
@@ -58,6 +60,22 @@ ${sources}${footerHtml}
 </body>
 </html>
 `;
+}
+
+// Table of contents — rendered only when the answer is long enough to need
+// navigation (3+ h2/h3 headings). Slugs come from extractHeadings, which
+// matches the ids markdownToHtml emits for the same document. ALL headings
+// feed the slugger (so dedupe counters line up); only h2/h3 are listed.
+function renderToc(answerMd: string): string {
+  const entries = extractHeadings(answerMd).filter((h) => h.level === 2 || h.level === 3);
+  if (entries.length < 3) return "";
+  const items = entries
+    .map(
+      (h) =>
+        `      <li class="toc-l${h.level}"><a href="#${h.slug}">${escapeHtml(h.text)}</a></li>`,
+    )
+    .join("\n");
+  return `\n  <nav class="toc">\n    <ul>\n${items}\n    </ul>\n  </nav>`;
 }
 
 function renderMetaLine(record: SessionRecord): string {
@@ -129,6 +147,10 @@ p { margin: 0 0 1rem; }
 a { color: #1a56db; text-decoration: none; }
 a:hover { text-decoration: underline; }
 .meta { color: #6b7280; font-size: 0.85rem; margin: 0 0 2rem; }
+.toc { margin: -1rem 0 2rem; padding: 0.75rem 1rem; background: #f3f4f6; border-radius: 8px; font-size: 0.9rem; }
+.toc ul { margin: 0; padding: 0; list-style: none; }
+.toc li { margin: 0.25rem 0; }
+.toc .toc-l3 { padding-left: 1.1rem; }
 article { font-size: 1.02rem; }
 ul, ol { padding-left: 1.5rem; margin: 0 0 1rem; }
 li { margin: 0.3rem 0; }
@@ -151,6 +173,7 @@ footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid #e5e7eb; 
   body { color: #e5e7eb; background: #18181b; }
   a { color: #7aa7ff; }
   .meta, footer { color: #9ca3af; }
+  .toc { background: #27272a; }
   blockquote { border-left-color: #3f3f46; color: #a1a1aa; }
   code, pre { background: #27272a; }
   th { background: #27272a; }

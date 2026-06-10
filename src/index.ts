@@ -150,6 +150,10 @@ export {
   markdownToHtml,
   renderInline,
   escapeHtml,
+  extractHeadings,
+  headingPlainText,
+  slugify,
+  type Heading,
   type MarkdownToHtmlOptions,
 } from "./markdown.js";
 export {
