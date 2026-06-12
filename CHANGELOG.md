@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-06-11
+
+### Added — PDFs out of the box
+
+- **`pdfjs-dist` ships as an optional dependency** — a default `npm install -g @askalf/deepdive` now reads PDFs with zero extra steps. The academic adapters (arxiv, pubmed, semanticscholar, openalex) surface PDFs constantly; silently skipping them gutted exactly the queries those adapters exist for. Degradation stays graceful: `--omit=optional` installs (and Node versions below pdfjs-dist's `>=22.13` engines floor, where npm engine-skips the optional dep) still run fully — PDF sources are skipped with the existing `pdf-no-extractor` event and `doctor` reports the state. CI's Node matrix now tests both worlds.
+
+### Added — `--max-runtime` global deadline
+
+- **`--max-runtime=<dur>`** (env `DEEPDIVE_MAX_RUNTIME`, config key `maxRuntime`) — wall-clock deadline for the whole run, so a wedged stage can never hang a run forever (observed in the wild: an indefinite fetch-stage wedge with all per-fetch timeouts "passing"). Graceful unwind via the run's AbortSignal at the deadline (browser closes, the message names the cause, exit 1) plus an unref'd hard-exit backstop 15s later if the unwind itself wedges. Unit required (`90s`, `10m`, `1h`) — the shared duration parser defaults bare numbers to *days*, and a silent `--max-runtime=300` → 300 days would be worse than no deadline.
+
+### Added — `multi:` degradation visibility + rate-limit benching
+
+- **`search.degraded` event** — a fan-out (`multi:`) search that succeeds overall but loses sub-adapters now reports them (`MultiSearch.lastFailures`, duck-read by the agent). Previously partial-failure tolerance *hid* a rate-limited backend: the first live bench run validated this — DDG was throttled the entire run and the answer quietly synthesized from a single StackExchange source.
+- **Benching** — a sub-adapter that rate-limits once is not re-asked for the rest of the run (it keeps appearing in `lastFailures` so the degradation stays visible). When every sub-adapter is benched, `multi:` throws `SearchRateLimitError`, composing with the round short-circuit and `--search-fallback`.
+- New export: `SubAdapterFailure`.
+
+### Added — quality bench harness
+
+- **`bench/run.mjs` + `bench/questions.json`** — six golden questions (factual, deep technical, scholarly, comparison, recency, practitioner) run through the built CLI against a live endpoint and scored on structural gates: completed, enough sources, citation-verifier support ratio, answer length, topical keywords, cost ceiling. Markdown scoreboard out. Manual dev tool by design (live LLM + live web) — never in CI. CLAUDE.md now requires a before/after bench run for any planner/synthesizer prompt change. Scoring functions are pure and unit-tested.
+
 ## [0.20.0] - 2026-06-11
 
 ### Added — search resilience: rate-limit detection, zero-source abort, recovery fallback
