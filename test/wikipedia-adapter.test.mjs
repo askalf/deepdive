@@ -85,3 +85,71 @@ test("WikipediaSearch.search: throws on non-2xx", async () => {
     globalThis.fetch = orig;
   }
 });
+
+// ── keyword ladder (#86) ─────────────────────────────────────────────────────
+
+function ladderFetchStub(resultsByQuery, calls) {
+  return async (url) => {
+    const q = new URL(String(url)).searchParams.get("srsearch");
+    calls.push(q);
+    const items = resultsByQuery[q] ?? [];
+    return new Response(JSON.stringify({ query: { search: items } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+}
+
+test("WikipediaSearch: zero-result query walks the keyword ladder until a hit", async () => {
+  const orig = globalThis.fetch;
+  const calls = [];
+  // The real bench query that hollowed out the fallback. Verbatim and the
+  // 4-keyword variant miss; the 2-keyword variant hits.
+  const query = "nginx fastcgi_buffer_size upstream sent too big header php-fpm fix";
+  globalThis.fetch = ladderFetchStub(
+    { "nginx fastcgi_buffer_size": [{ title: "Nginx", snippet: "web server" }] },
+    calls,
+  );
+  try {
+    const out = await new WikipediaSearch("en").search(query, 5);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].title, "Nginx");
+    assert.equal(calls[0], query, "verbatim tried first");
+    assert.ok(calls.length > 1 && calls.length <= 4, `ladder bounded (got ${calls.length} calls)`);
+    assert.equal(calls[calls.length - 1], "nginx fastcgi_buffer_size");
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("WikipediaSearch: verbatim hit never touches the ladder", async () => {
+  const orig = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = ladderFetchStub(
+    { "token bucket": [{ title: "Token bucket", snippet: "" }] },
+    calls,
+  );
+  try {
+    const out = await new WikipediaSearch("en").search("token bucket", 5);
+    assert.equal(out[0].title, "Token bucket");
+    assert.deepEqual(calls, ["token bucket"], "exactly one call");
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("WikipediaSearch: every rung empty returns [] without throwing", async () => {
+  const orig = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = ladderFetchStub({}, calls);
+  try {
+    const out = await new WikipediaSearch("en").search(
+      "how does HTTP/3 connection migration work and what breaks it in practice",
+      5,
+    );
+    assert.deepEqual(out, []);
+    assert.ok(calls.length >= 2, "ladder variants were attempted");
+  } finally {
+    globalThis.fetch = orig;
+  }
+});

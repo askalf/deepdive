@@ -208,6 +208,7 @@ export {
   type VerifyOptions,
 } from "./verify.js";
 export { trimTrailingSlashes, stripHashFragment, dedupeKey } from "./url-util.js";
+export { extractKeywords, keywordLadder } from "./query-keywords.js";
 export {
   runDoctor,
   renderDoctorText,
