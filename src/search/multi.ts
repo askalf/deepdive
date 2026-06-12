@@ -6,6 +6,7 @@
 // sub-adapter failed, so the agent's zero-source handling still fires.
 
 import { dedupeKey } from "../url-util.js";
+import { isRateLimitError, SearchRateLimitError } from "../search.js";
 import type { SearchAdapter, SearchResult } from "../search.js";
 
 export class MultiSearch implements SearchAdapter {
@@ -26,15 +27,24 @@ export class MultiSearch implements SearchAdapter {
     );
     const lists: SearchResult[][] = [];
     const failures: string[] = [];
+    let rateLimitedFailures = 0;
     settled.forEach((s, i) => {
       if (s.status === "fulfilled") lists.push(s.value);
       else {
+        if (isRateLimitError(s.reason)) rateLimitedFailures++;
         failures.push(
           `${this.adapters[i].name}: ${s.reason instanceof Error ? s.reason.message : String(s.reason)}`,
         );
       }
     });
     if (lists.length === 0) {
+      // When EVERY backend failed because of throttling, classify the
+      // aggregate as a rate limit so the agent stops re-asking this round.
+      // A mixed failure set stays a plain error — some backend might serve
+      // the next query fine.
+      if (rateLimitedFailures === failures.length) {
+        throw new SearchRateLimitError(this.name, failures.join(" · "));
+      }
       throw new Error(`multi: every sub-adapter failed — ${failures.join(" · ")}`);
     }
     return interleaveResults(lists, limit);

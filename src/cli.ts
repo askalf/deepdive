@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { resolveConfig, type CLIFlags } from "./config.js";
 import { parseMaxCost, BudgetExceededError } from "./budget.js";
 import { resolveSearchAdapter } from "./search.js";
-import { runAgent, type AgentEvent } from "./agent.js";
+import { runAgent, NoSourcesError, type AgentEvent } from "./agent.js";
 import { createCache } from "./cache.js";
 import { createRobotsCache } from "./robots.js";
 import { renderSourcesMarkdown, renderAnswerMarkdown } from "./citations.js";
@@ -199,7 +199,13 @@ Environment:
   DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES,
   DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_SINCE, DEEPDIVE_API_FORMAT,
   DEEPDIVE_NO_DEDUPE, DEEPDIVE_DEDUPE_THRESHOLD, DEEPDIVE_TAGS,
-  DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR, DEEPDIVE_CONFIG
+  DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR, DEEPDIVE_CONFIG,
+  DEEPDIVE_DDG_DELAY_MS (spacing between DuckDuckGo requests; default 1000, 0 disables)
+
+Exit codes:
+  0 success · 1 error · 2 bad usage or --max-cost cap hit · 3 zero sources
+  gathered (run stopped before the synthesis LLM call; commonly the search
+  backend rate-limiting — the message names the cause)
 
 Config file:
   ~/.deepdive/config.json (override path with DEEPDIVE_CONFIG) — JSON object of
@@ -505,6 +511,10 @@ function renderEvent(e: AgentEvent): string {
       return `  search  ${e.query}`;
     case "search.done":
       return `          ${e.count} result${e.count === 1 ? "" : "s"}`;
+    case "search.error":
+      return `  search  ⚠ ${e.rateLimited ? "rate-limited" : "failed"} — ${e.message}${
+        e.rateLimited ? " (skipping this round's remaining queries)" : ""
+      }`;
     case "fetch.start":
       return `  fetch   ${e.cached ? "(cached) " : ""}${e.url}`;
     case "fetch.done":
@@ -604,6 +614,37 @@ export function renderCitationHealthFooter(
     `in their cited source (threshold ${report.threshold}). ` +
     `Run with \`--verbose\` to see which.\n`
   );
+}
+
+// Exported for unit tests. Friendly multi-line rendering of a NoSourcesError —
+// the structured fields tell us WHY the pipeline came up empty, so the message
+// can name the actual problem and a concrete next step instead of a generic
+// failure line.
+export function renderNoSourcesMessage(err: NoSourcesError): string {
+  const lines = [`deepdive: ${err.message} — stopped before spending the synthesis LLM call.`];
+  const rateLimited = err.searchErrors.some((e) => e.rateLimited);
+  for (const e of err.searchErrors.slice(0, 3)) {
+    lines.push(`  search error: ${scrubPath(e.message)}`);
+  }
+  if (err.searchErrors.length > 3) {
+    lines.push(`  … and ${err.searchErrors.length - 3} more search error(s)`);
+  }
+  if (err.candidatesFound > 0) {
+    lines.push(
+      `  candidates were found but none survived fetch + extraction (robots, fetch errors, paywalls).`,
+      `  try: --verbose to see per-URL outcomes, or --ignore-robots if appropriate.`,
+    );
+  } else if (rateLimited) {
+    lines.push(
+      `  try: wait a minute and re-run, or switch backends —`,
+      `       --search=multi:wikipedia,arxiv (keyless) or --search=brave (needs DEEPDIVE_BRAVE_KEY)`,
+    );
+  } else {
+    lines.push(
+      `  try: rephrase the question, or a different backend — --search=multi:duckduckgo,wikipedia`,
+    );
+  }
+  return lines.join("\n");
 }
 
 // Exported for unit tests. User-facing error rendering at the CLI boundary.
@@ -1043,6 +1084,12 @@ async function runResearch(
     if (err instanceof BudgetExceededError) {
       process.stderr.write(`deepdive: ${err.message}\n`);
       return { code: 2 };
+    }
+    // v0.20.0 — distinct exit code for "the pipeline gathered zero sources,
+    // so we stopped before the synthesis call". Scripts can branch on 3.
+    if (err instanceof NoSourcesError) {
+      process.stderr.write(renderNoSourcesMessage(err) + "\n");
+      return { code: 3 };
     }
     process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
     return { code: 1 };
