@@ -37,13 +37,30 @@ const GENERIC_WORDS = new Set([
   "tutorial", "week", "weeks", "work", "working", "works", "year", "years",
 ]);
 
+// Single-character class tests — applied per position by trimPunctuation's
+// linear index walk, never with a quantifier over library input (CodeQL
+// js/polynomial-redos: `X+$`-style trim regexes backtrack quadratically on
+// adversarial tokens; an index walk can't).
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+const WORD_TAIL_CHAR = /[\p{L}\p{N}+#]/u; // C++ / C# keep their suffix
+
+// Trim surrounding punctuation from one whitespace-split token, preserving
+// internal structure (HTTP/3, php-fpm, fastcgi_buffer_size) and trailing
+// +/# (C++, C#).
+function trimPunctuation(token: string): string {
+  let start = 0;
+  while (start < token.length && !WORD_CHAR.test(token[start])) start++;
+  let end = token.length - 1;
+  while (end >= start && !WORD_TAIL_CHAR.test(token[end])) end--;
+  return token.slice(start, end + 1);
+}
+
 // Ordered content tokens of a query: whitespace-split, surrounding
-// punctuation trimmed (internal structure like HTTP/3, php-fpm,
-// fastcgi_buffer_size survives), stopwords and generic words dropped.
+// punctuation trimmed, stopwords and generic words dropped.
 export function extractKeywords(query: string): string[] {
   return query
     .split(/\s+/)
-    .map((t) => t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}+#]+$/gu, ""))
+    .map(trimPunctuation)
     .filter((t) => t.length > 0)
     .filter((t) => {
       const low = t.toLowerCase();
