@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-06-12
+
+### Changed — date-grounded planner and critic
+
+- **The planner and critic prompts now carry today's date** (`Today's date: YYYY-MM-DD`). Without it, recency-sensitive questions got sub-queries anchored to the model's training-time sense of "recent" — and with `--since` set, the post-fetch freshness filter then culled most of what those stale queries returned (the v0.23.0 bench's `recent` question kept 1 source against a 3-source minimum, deterministically).
+- **Event-shaped sub-queries** (releases, announcements, news, versions) are directed to use absolute dates instead of "latest"/"recent"; **conceptual and scholarly sub-queries are directed to stay timeless**. The counterweight matters: blanket year-anchoring measurably hurt the scholarly bench question (citation support 0.68 → 0.44, reproduced) because bare year tokens distort keyword-matched sources like arXiv/OpenAlex. With the scoped rules, academic recovered to 0.92 and `recent` rose from a deterministic 1 source to 2–4 across runs (single-change board in `bench/results/2026-06-12-v0.25.0-date-grounding.md`, run at the pre-0.24.0 base — combined with 0.24.0's news fallback, `recent` holds its gate).
+- **With `--since`, the prompts disclose the cutoff** ("a freshness filter will DROP every source published before …") so every sub-query is shaped to the surviving window. New `PlanContext` (`now`, `sinceMs`) threaded from the agent at both `planQueries`/`critique` call sites; prompt contracts pinned by `test/plan-prompt.test.mjs`.
+
 ## [0.24.0] - 2026-06-12
 
 ### Added — news adapter (keyless) + recency-aware fallback
