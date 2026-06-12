@@ -417,7 +417,7 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 
 | Adapter | Flag | Needs | Notes |
 |---|---|---|---|
-| DuckDuckGo HTML | `--search=duckduckgo` (default) | nothing | Scrapes `html.duckduckgo.com`. Good enough for most questions. |
+| DuckDuckGo HTML | `--search=duckduckgo` (default) | nothing | Scrapes `html.duckduckgo.com`. Good enough for most questions. Rate-limits bursts — deepdive spaces requests 1s apart (`DEEPDIVE_DDG_DELAY_MS` to tune, `0` disables) and reports a detected throttle as a rate-limit error instead of a silent empty round. |
 | SearXNG | `--search=searxng` | `DEEPDIVE_SEARXNG_URL` | Self-hosted metasearch. Best privacy. |
 | Brave Search | `--search=brave` | `DEEPDIVE_BRAVE_KEY` | Paid, high quality. |
 | Tavily | `--search=tavily` | `DEEPDIVE_TAVILY_KEY` | Research-tuned. Returns pre-extracted content; deepdive re-fetches anyway for consistency. |
@@ -434,6 +434,8 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 | Multi | `--search=multi:<a>,<b>[,...]` | whatever the parts need | Fan-out: queries every listed adapter concurrently, interleaves results round-robin, dedupes by URL. A throttled backend doesn't sink the round — it throws only if *all* fail. |
 
 The fan-out is how the adapter fleet composes: one general-web engine plus one or two domain engines gives the planner a source pool no single backend returns.
+
+When a round gathers **zero** sources (backend throttled, every fetch blocked), deepdive stops *before* the synthesis LLM call and exits with code `3` and a message naming the cause — it never spends tokens producing a citation-free "unable to answer".
 
 ```bash
 deepdive "are transformer alternatives viable in 2026" \

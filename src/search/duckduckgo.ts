@@ -5,14 +5,52 @@
 //
 // If DDG changes their HTML layout, this breaks. Regenerate parser accordingly.
 
-import { searchTimeoutSignal, type SearchAdapter, type SearchResult } from "../search.js";
+import {
+  searchTimeoutSignal,
+  SearchRateLimitError,
+  type SearchAdapter,
+  type SearchResult,
+} from "../search.js";
 
 const ENDPOINT = "https://html.duckduckgo.com/html/";
 
+// DDG's HTML endpoint throttles bursts (~7 rapid queries trips it) and then
+// answers 200 with a bot-challenge page instead of results — which the parser
+// would silently turn into an empty list, burning the synthesis LLM call on
+// nothing. Two defenses: space consecutive requests out (below), and detect
+// the challenge / throttle response so the caller gets a typed rate-limit
+// error instead of a mysterious all-zero round.
+const DEFAULT_REQUEST_SPACING_MS = 1_000;
+
+function requestSpacingMs(): number {
+  const raw = process.env["DEEPDIVE_DDG_DELAY_MS"];
+  if (raw === undefined || raw.trim() === "") return DEFAULT_REQUEST_SPACING_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_REQUEST_SPACING_MS;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    // Wake early on abort — the fetch right after will throw on the
+    // already-aborted signal, so resolving (not rejecting) is fine here.
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+
 export class DuckDuckGoSearch implements SearchAdapter {
   readonly name = "duckduckgo";
+  private lastRequestAt = 0;
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    const wait = this.lastRequestAt + requestSpacingMs() - Date.now();
+    if (wait > 0) await sleep(wait, signal);
+    this.lastRequestAt = Date.now();
     const form = new URLSearchParams({ q: query });
     const res = await fetch(ENDPOINT, {
       method: "POST",
@@ -25,10 +63,32 @@ export class DuckDuckGoSearch implements SearchAdapter {
       body: form.toString(),
       signal: searchTimeoutSignal(signal),
     });
+    // DDG signals "slow down" as 202 (anomaly check), 403, or 429 depending
+    // on which layer trips first.
+    if (res.status === 202 || res.status === 403 || res.status === 429) {
+      throw new SearchRateLimitError(this.name, `HTTP ${res.status}`);
+    }
     if (!res.ok) throw new Error(`duckduckgo ${res.status} ${res.statusText}`);
     const html = await res.text();
-    return parseDuckDuckGoHTML(html, limit);
+    const results = parseDuckDuckGoHTML(html, limit);
+    // Only inspect for a challenge page when parsing found nothing — a page
+    // with real results is never the challenge, so this can't false-positive
+    // on a snippet that merely mentions the marker strings.
+    if (results.length === 0 && looksLikeDdgChallenge(html)) {
+      throw new SearchRateLimitError(this.name, "challenge page returned");
+    }
+    return results;
   }
+}
+
+// Exported for unit tests. Markers seen on DDG's bot-challenge / anomaly
+// page. indexOf-style scanning, no HTML regex (CodeQL: js/bad-tag-filter).
+export function looksLikeDdgChallenge(html: string): boolean {
+  return (
+    html.includes("anomaly-modal") ||
+    html.includes("challenge-form") ||
+    html.toLowerCase().includes("bots use duckduckgo too")
+  );
 }
 
 // Exported for unit tests.

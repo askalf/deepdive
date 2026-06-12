@@ -9,8 +9,8 @@
 // backed by an on-disk cache (src/cache.ts) so re-running a question is cheap.
 
 import { withModel, type LLMConfig } from "./llm.js";
-import type { SearchAdapter } from "./search.js";
-import { dedupeByUrl } from "./search.js";
+import type { SearchAdapter, SearchResult } from "./search.js";
+import { dedupeByUrl, isRateLimitError } from "./search.js";
 import { planQueries, critique, type Plan, type Critique } from "./plan.js";
 import { BrowserSession, type BrowserOptions, type FetchedPage } from "./browser.js";
 import { extractContent } from "./extract.js";
@@ -138,6 +138,10 @@ export type AgentEvent =
   | { type: "round.start"; round: number; queries: string[] }
   | { type: "search.start"; query: string }
   | { type: "search.done"; query: string; count: number }
+  // v0.20.0 — a search call failed. The agent records it and moves on to the
+  // next query instead of killing the run; when rateLimited it also skips the
+  // round's remaining queries (they'd hit the same limiter).
+  | { type: "search.error"; query: string; message: string; rateLimited: boolean }
   | { type: "fetch.start"; url: string; cached: boolean }
   | {
       type: "fetch.done";
@@ -220,6 +224,37 @@ export interface AgentResult {
 
 type Candidate = { url: string; title: string; snippet: string; query: string };
 
+export interface SearchErrorInfo {
+  query: string;
+  message: string;
+  rateLimited: boolean;
+}
+
+// v0.20.0 — thrown instead of synthesizing when zero sources survived the
+// search + fetch + filter pipeline. Synthesizing over an empty source packet
+// burns an LLM call to produce a guaranteed "unable to answer" (observed in
+// the wild when DDG silently rate-limits a burst of queries). Failing loud
+// with diagnostics is cheaper and more honest; the CLI renders a
+// what-to-try-next message from the structured fields.
+export class NoSourcesError extends Error {
+  constructor(
+    public readonly adapter: string,
+    public readonly queries: string[],
+    public readonly candidatesFound: number,
+    public readonly searchErrors: SearchErrorInfo[],
+  ) {
+    const n = queries.length;
+    super(
+      candidatesFound === 0
+        ? `no sources gathered: ${n} quer${n === 1 ? "y" : "ies"} via ${adapter} returned 0 usable results${
+            searchErrors.some((e) => e.rateLimited) ? " (rate-limited)" : ""
+          }`
+        : `no sources gathered: ${candidatesFound} candidate(s) found but none could be fetched and extracted`,
+    );
+    this.name = "NoSourcesError";
+  }
+}
+
 export async function runAgent(
   question: string,
   config: AgentConfig,
@@ -287,6 +322,7 @@ export async function runAgent(
   const seenUrls = new Set<string>();
   const allCandidates: Candidate[] = [];
   const allQueries: string[] = [];
+  const searchErrors: SearchErrorInfo[] = [];
   const keptSources: SourceWithContent[] = [];
   // Shingle sets for near-dup detection, lazily synced to keptSources so
   // include[]/preKept entries (pushed below without touching this array)
@@ -370,11 +406,27 @@ export async function runAgent(
       for (const query of queriesForRound) {
         if (signal?.aborted) throw new Error("aborted");
         emit(config, { type: "search.start", query });
-        const results = await config.search.search(
-          query,
-          config.resultsPerQuery,
-          signal,
-        );
+        let results: SearchResult[];
+        try {
+          results = await config.search.search(
+            query,
+            config.resultsPerQuery,
+            signal,
+          );
+        } catch (err) {
+          // A failed search shouldn't sink the round — record it, surface it
+          // as an event, and move on. The zero-source guard below catches the
+          // everything-failed case before any synthesis money is spent.
+          if (signal?.aborted) throw err;
+          const rateLimited = isRateLimitError(err);
+          const message = err instanceof Error ? err.message : String(err);
+          searchErrors.push({ query, message, rateLimited });
+          emit(config, { type: "search.error", query, message, rateLimited });
+          // The limiter that refused this query will refuse the round's
+          // remaining queries too — skip them rather than hammer it.
+          if (rateLimited) break;
+          continue;
+        }
         const fresh = dedupeByUrl(results).filter((r) => !seenUrls.has(r.url));
         let kept = 0;
         for (const r of fresh) {
@@ -513,6 +565,19 @@ export async function runAgent(
           ...(publishedAt !== undefined ? { publishedAt } : {}),
           content,
         });
+      }
+
+      // Zero-source guard: synthesizing over an empty source packet would
+      // burn an LLM call on a guaranteed "unable to answer". Throw with the
+      // diagnostics instead. Only an issue at round 0 — later rounds can only
+      // grow keptSources — but the guard is cheap, so it's unconditional.
+      if (keptSources.length === 0) {
+        throw new NoSourcesError(
+          config.search.name,
+          allQueries,
+          allCandidates.length,
+          searchErrors,
+        );
       }
 
       emit(config, {

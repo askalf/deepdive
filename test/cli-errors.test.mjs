@@ -5,7 +5,9 @@ import {
   safeErrorMessage,
   renderCitationHealthFooter,
   renderCostSummary,
+  renderNoSourcesMessage,
 } from "../dist/cli.js";
+import { NoSourcesError } from "../dist/agent.js";
 
 test("safeErrorMessage: home dir scrubbed from Error.message", () => {
   const home = homedir();
@@ -86,6 +88,45 @@ test("renderCostSummary: omits the dario hint when baseUrl is something else", (
   const out = renderCostSummary(cost, "claude-sonnet-4-6", "https://api.anthropic.com");
   assert.match(out, /^cost · /);
   assert.doesNotMatch(out, /Claude Max/);
+});
+
+test("renderNoSourcesMessage: rate-limited case suggests waiting or switching backends", () => {
+  const err = new NoSourcesError("duckduckgo", ["q1", "q2"], 0, [
+    { query: "q1", message: "duckduckgo is rate-limiting requests (HTTP 403)", rateLimited: true },
+  ]);
+  const out = renderNoSourcesMessage(err);
+  assert.match(out, /stopped before spending the synthesis LLM call/);
+  assert.match(out, /HTTP 403/);
+  assert.match(out, /--search=multi:wikipedia,arxiv/);
+  assert.match(out, /wait a minute/);
+});
+
+test("renderNoSourcesMessage: zero candidates without errors suggests rephrasing", () => {
+  const err = new NoSourcesError("duckduckgo", ["q1"], 0, []);
+  const out = renderNoSourcesMessage(err);
+  assert.match(out, /rephrase the question/);
+  assert.doesNotMatch(out, /wait a minute/);
+});
+
+test("renderNoSourcesMessage: candidates-but-none-kept names the fetch side", () => {
+  const err = new NoSourcesError("duckduckgo", ["q1"], 4, []);
+  const out = renderNoSourcesMessage(err);
+  assert.match(out, /none survived fetch \+ extraction/);
+  assert.match(out, /--verbose/);
+});
+
+test("renderNoSourcesMessage: caps the listed search errors at 3", () => {
+  const errors = Array.from({ length: 5 }, (_, i) => ({
+    query: `q${i}`,
+    message: `error ${i}`,
+    rateLimited: false,
+  }));
+  const err = new NoSourcesError("duckduckgo", errors.map((e) => e.query), 0, errors);
+  const out = renderNoSourcesMessage(err);
+  assert.match(out, /error 0/);
+  assert.match(out, /error 2/);
+  assert.doesNotMatch(out, /error 3/);
+  assert.match(out, /and 2 more search error/);
 });
 
 test("renderCitationHealthFooter: emits a footer when there are unsupported cites", () => {

@@ -2,11 +2,13 @@
 
 export {
   runAgent,
+  NoSourcesError,
   type AgentConfig,
   type AgentEvent,
   type AgentResult,
   type BrowserLike,
   type RoundTrace,
+  type SearchErrorInfo,
 } from "./agent.js";
 export {
   planQueries,
@@ -19,6 +21,8 @@ export {
 export {
   resolveSearchAdapter,
   dedupeByUrl,
+  SearchRateLimitError,
+  isRateLimitError,
   type SearchAdapter,
   type SearchResult,
 } from "./search.js";

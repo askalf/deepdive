@@ -15,6 +15,32 @@ export interface SearchAdapter {
   search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]>;
 }
 
+// Typed "the backend is refusing us because we asked too often" error —
+// distinct from a parse failure or network error so the agent can stop
+// hammering the engine for the rest of the round and the CLI can suggest a
+// concrete fallback instead of a mysterious all-zero-results run. Adapters
+// that can recognize their backend's throttle response should throw this.
+export class SearchRateLimitError extends Error {
+  readonly rateLimited = true;
+  constructor(
+    public readonly adapter: string,
+    detail: string,
+  ) {
+    super(`${adapter} is rate-limiting requests (${detail})`);
+    this.name = "SearchRateLimitError";
+  }
+}
+
+// Duck-typed check (rather than bare instanceof) so a rate-limit error
+// still classifies correctly if two copies of this module are loaded
+// (e.g. a library consumer bundling their own deepdive build).
+export function isRateLimitError(err: unknown): boolean {
+  return (
+    err instanceof SearchRateLimitError ||
+    (err instanceof Error && (err as { rateLimited?: unknown }).rateLimited === true)
+  );
+}
+
 // Per-request search timeout. Adapters previously passed only the caller's
 // abort signal (wired to SIGINT/SIGTERM), so a hung search endpoint blocked the
 // whole run with no escape. Combine the caller's signal with a hard timeout,
