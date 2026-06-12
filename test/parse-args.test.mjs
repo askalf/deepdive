@@ -55,6 +55,11 @@ test("parseArgs: --search-fallback=LIST is lowercased and captured", () => {
   assert.equal(p.flags.searchFallback, "wikipedia,arxiv");
 });
 
+test("parseArgs: --max-runtime=DUR captured", () => {
+  const p = parseArgs(["q", "--max-runtime=10m"]);
+  assert.equal(p.flags.maxRuntime, "10m");
+});
+
 test("parseArgs: unknown --flag throws", () => {
   assert.throws(() => parseArgs(["q", "--what=no"]), /unknown flag/);
 });

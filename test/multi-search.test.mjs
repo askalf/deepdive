@@ -135,3 +135,81 @@ test("normalizeAdapterList: empty and comma-only input return undefined", () => 
   assert.equal(normalizeAdapterList("  "), undefined);
   assert.equal(normalizeAdapterList(",,"), undefined);
 });
+
+// ── lastFailures + benching (v0.21.0) ────────────────────────────────────────
+
+function countingFake(name, behave) {
+  const calls = { n: 0 };
+  return {
+    calls,
+    adapter: {
+      name,
+      async search(q, limit) {
+        calls.n++;
+        return behave(q, limit, calls.n);
+      },
+    },
+  };
+}
+
+test("MultiSearch: partial failure lands in lastFailures, others' results returned", async () => {
+  const a = { name: "a", async search() { throw new Error("a exploded"); } };
+  const b = fake("b", [r("https://b/1")]);
+  const m = new MultiSearch([a, b]);
+  const out = await m.search("q", 10);
+  assert.equal(out.length, 1);
+  assert.equal(m.lastFailures.length, 1);
+  assert.equal(m.lastFailures[0].adapter, "a");
+  assert.equal(m.lastFailures[0].rateLimited, false);
+  assert.match(m.lastFailures[0].message, /a exploded/);
+});
+
+test("MultiSearch: plain failure is NOT benched — retried next query", async () => {
+  const failing = countingFake("a", () => { throw new Error("flaky"); });
+  const ok = fake("b", [r("https://b/1")]);
+  const m = new MultiSearch([failing.adapter, ok]);
+  await m.search("q1", 10);
+  await m.search("q2", 10);
+  assert.equal(failing.calls.n, 2, "plain failures keep getting retried");
+});
+
+test("MultiSearch: rate-limited sub-adapter is benched for the run's remainder", async () => {
+  const { SearchRateLimitError } = await import("../dist/search.js");
+  const limited = countingFake("ddg", () => { throw new SearchRateLimitError("ddg", "HTTP 403"); });
+  const ok = fake("so", [r("https://so/1")]);
+  const m = new MultiSearch([limited.adapter, ok]);
+
+  const out1 = await m.search("q1", 10);
+  assert.equal(out1.length, 1);
+  assert.equal(limited.calls.n, 1);
+  assert.equal(m.lastFailures[0].rateLimited, true);
+
+  const out2 = await m.search("q2", 10);
+  assert.equal(out2.length, 1);
+  assert.equal(limited.calls.n, 1, "benched — not asked again");
+  assert.equal(m.lastFailures.length, 1, "bench stays visible in lastFailures");
+  assert.match(m.lastFailures[0].message, /rate-limited earlier/);
+});
+
+test("MultiSearch: every sub-adapter benched throws SearchRateLimitError", async () => {
+  const { SearchRateLimitError } = await import("../dist/search.js");
+  const lim = (name) => ({ name, async search() { throw new SearchRateLimitError(name, "429"); } });
+  const m = new MultiSearch([lim("a"), lim("b")]);
+  await assert.rejects(() => m.search("q1", 10), (e) => e instanceof SearchRateLimitError);
+  await assert.rejects(
+    () => m.search("q2", 10),
+    (e) => e instanceof SearchRateLimitError && /every sub-adapter is rate-limited/.test(e.message),
+  );
+});
+
+test("MultiSearch: lastFailures resets between calls", async () => {
+  let fail = true;
+  const flaky = { name: "a", async search() { if (fail) throw new Error("once"); return [r("https://a/1")]; } };
+  const ok = fake("b", [r("https://b/1")]);
+  const m = new MultiSearch([flaky, ok]);
+  await m.search("q1", 10);
+  assert.equal(m.lastFailures.length, 1);
+  fail = false;
+  await m.search("q2", 10);
+  assert.equal(m.lastFailures.length, 0, "healthy call leaves no stale failures");
+});

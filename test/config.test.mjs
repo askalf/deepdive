@@ -60,6 +60,22 @@ test("resolveConfig: blank searchFallback env treated as unset", () => {
   assert.equal(c.searchFallback, undefined);
 });
 
+test("resolveConfig: maxRuntime resolves durations, flag over env, default unset", () => {
+  assert.equal(resolveConfig({}, {}).maxRuntimeMs, undefined);
+  assert.equal(resolveConfig({ maxRuntime: "10m" }, {}).maxRuntimeMs, 600_000);
+  assert.equal(resolveConfig({}, { DEEPDIVE_MAX_RUNTIME: "90s" }).maxRuntimeMs, 90_000);
+  assert.equal(
+    resolveConfig({ maxRuntime: "1h" }, { DEEPDIVE_MAX_RUNTIME: "90s" }).maxRuntimeMs,
+    3_600_000,
+  );
+});
+
+test("resolveConfig: unparseable maxRuntime keeps the raw for the CLI's loud error", () => {
+  const c = resolveConfig({ maxRuntime: "soon" }, {});
+  assert.equal(c.maxRuntimeMs, undefined);
+  assert.equal(c.maxRuntimeRaw, "soon");
+});
+
 test("resolveConfig: DEEPDIVE_VERBOSE=1 flips verbose", () => {
   const c = resolveConfig({}, { DEEPDIVE_VERBOSE: "1" });
   assert.equal(c.verbose, true);

@@ -403,6 +403,47 @@ test("agent: primary AND fallback empty still throws NoSourcesError", async () =
   }
 });
 
+test("agent: adapter lastFailures surface as a search.degraded event", async () => {
+  // Mimics MultiSearch's duck-typed contract: results returned, but one
+  // sub-adapter failed along the way.
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const adapter = {
+    name: "multi(ddg,so)",
+    lastFailures: [],
+    async search() {
+      this.lastFailures = [
+        { adapter: "ddg", message: "ddg is rate-limiting requests (HTTP 403)", rateLimited: true },
+      ];
+      return [{ url: "https://so.com/hit", title: "Hit", snippet: "", rank: 1 }];
+    },
+  };
+  const events = [];
+
+  try {
+    const result = await runAgent("q", {
+      ...BASE_CONFIG,
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search: adapter,
+      browserFactory: mockBrowserFactory({ "https://so.com/hit": { text: LOREM, title: "Hit" } }),
+      onEvent: (e) => {
+        if (e.type === "search.degraded") events.push(e);
+      },
+    });
+    assert.equal(result.sources.length, 1, "run completes on the surviving backend");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].query, "q1");
+    assert.equal(events[0].failures.length, 1);
+    assert.equal(events[0].failures[0].adapter, "ddg");
+    assert.equal(events[0].failures[0].rateLimited, true);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("multi: all sub-adapters rate-limited classifies as a rate limit", async () => {
   const limited = (name) => ({
     name,

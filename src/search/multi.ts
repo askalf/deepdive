@@ -7,10 +7,22 @@
 
 import { dedupeKey } from "../url-util.js";
 import { isRateLimitError, SearchRateLimitError } from "../search.js";
-import type { SearchAdapter, SearchResult } from "../search.js";
+import type { SearchAdapter, SearchResult, SubAdapterFailure } from "../search.js";
 
 export class MultiSearch implements SearchAdapter {
   readonly name: string;
+  // Sub-adapters that failed on the most recent search() while others
+  // succeeded — reset per call (a fully-failed call throws instead). The
+  // agent duck-reads this after each call (same pattern as AutoSearch's
+  // lastEngine) and surfaces it as a `search.degraded` event; without it, a
+  // silently rate-limited backend hides inside partial-failure tolerance and
+  // the user never learns why the source pool got thin.
+  lastFailures: SubAdapterFailure[] = [];
+  // A sub-adapter that rate-limits once is benched for the rest of this
+  // instance's lifetime (= the run): re-asking a limiter that just refused
+  // wastes time and digs the throttle hole deeper. Benched adapters keep
+  // appearing in lastFailures so the degradation stays visible per query.
+  private benched = new Set<string>();
 
   constructor(private readonly adapters: SearchAdapter[]) {
     if (adapters.length < 2) {
@@ -20,22 +32,39 @@ export class MultiSearch implements SearchAdapter {
   }
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    this.lastFailures = this.adapters
+      .filter((a) => this.benched.has(a.name))
+      .map((a) => ({
+        adapter: a.name,
+        message: "rate-limited earlier in this run; skipped",
+        rateLimited: true,
+      }));
+    const active = this.adapters.filter((a) => !this.benched.has(a.name));
+    if (active.length === 0) {
+      throw new SearchRateLimitError(this.name, "every sub-adapter is rate-limited");
+    }
     const settled = await Promise.allSettled(
       // Ask each backend for the full limit — each ranks its own world and
       // interleave + dedupe below trims the merged pool back down.
-      this.adapters.map((a) => a.search(query, limit, signal)),
+      active.map((a) => a.search(query, limit, signal)),
     );
     const lists: SearchResult[][] = [];
     const failures: string[] = [];
     let rateLimitedFailures = 0;
     settled.forEach((s, i) => {
-      if (s.status === "fulfilled") lists.push(s.value);
-      else {
-        if (isRateLimitError(s.reason)) rateLimitedFailures++;
-        failures.push(
-          `${this.adapters[i].name}: ${s.reason instanceof Error ? s.reason.message : String(s.reason)}`,
-        );
+      if (s.status === "fulfilled") {
+        lists.push(s.value);
+        return;
       }
+      const adapter = active[i].name;
+      const rateLimited = isRateLimitError(s.reason);
+      if (rateLimited) {
+        this.benched.add(adapter);
+        rateLimitedFailures++;
+      }
+      const message = s.reason instanceof Error ? s.reason.message : String(s.reason);
+      failures.push(`${adapter}: ${message}`);
+      this.lastFailures.push({ adapter, message, rateLimited });
     });
     if (lists.length === 0) {
       // When EVERY backend failed because of throttling, classify the
