@@ -328,7 +328,12 @@ export async function runAgent(
     };
 
   emit(config, { type: "plan.start", question });
-  const plan = await planQueries(question, stageLLM.plan, signal, usageSinkFor("plan", 0));
+  // Date-ground the planner (and disclose the --since window when set) so
+  // recency-sensitive queries anchor to the actual current date instead of
+  // the model's training-time sense of "recent" — see PlanContext.
+  const plan = await planQueries(question, stageLLM.plan, signal, usageSinkFor("plan", 0), {
+    sinceMs: config.sinceMs,
+  });
   emit(config, { type: "plan.done", plan });
 
   const seenUrls = new Set<string>();
@@ -668,6 +673,7 @@ export async function runAgent(
           signal,
           usageSinkFor("critique", round),
           weakCites,
+          { sinceMs: config.sinceMs },
         );
         emit(config, { type: "critique.done", round, critique: crit });
         roundTrace.critique = crit;
