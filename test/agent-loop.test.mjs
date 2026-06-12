@@ -11,6 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgent } from "../dist/agent.js";
 import { createCache } from "../dist/cache.js";
+import { isPdfExtractorAvailable } from "../dist/pdf.js";
+
+// pdfjs-dist is an optional dependency — absent on --omit=optional installs
+// and on Node versions its engines field excludes. The PDF-routing test only
+// runs where it's installed; pdf.test.mjs covers the degraded path.
+const pdfjsAvailable = await isPdfExtractorAvailable();
 
 function makeLLMServer(responseQueue, usageQueue) {
   // responseQueue: array of strings to hand out in order, one per request.
@@ -872,7 +878,7 @@ test("agent: preKept dedupes against fresh search results (no re-fetch of saved 
   }
 });
 
-test("agent: routes PDF byte responses through the PDF extractor", async () => {
+test("agent: routes PDF byte responses through the PDF extractor", { skip: !pdfjsAvailable && "pdfjs-dist not installed (optional dep)" }, async () => {
   const planJson = '{"queries":["q1"]}';
   const synthText = "Answer [1].";
   const { server } = makeLLMServer([planJson, synthText]);

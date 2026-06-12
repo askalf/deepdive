@@ -214,13 +214,13 @@ Two long-standing gaps closed in v0.7: real research questions hit PDFs constant
 
 **PDFs** are detected by URL extension or `Content-Type` and routed through a separate extractor instead of the headless browser's DOM (Chromium's PDF viewer doesn't expose useful text). Page cap defaults to 50 (`--pdf-max-pages=<n>`); large papers are truncated rather than blowing the synth context.
 
-PDF extraction uses [`pdfjs-dist`](https://github.com/mozilla/pdfjs-dist) — Mozilla's reference PDF.js library. Since v0.21 it ships as an **optional dependency**, so a default `npm install -g @askalf/deepdive` reads PDFs out of the box — the academic adapters (arxiv, pubmed, semanticscholar, openalex) surface PDFs constantly, and silently skipping them gutted exactly the queries those adapters exist for. It stays *optional* (pure JS, no build step, so it essentially always installs) to keep the degradation graceful: installs with `--omit=optional` still get a fully working deepdive, PDFs are skipped with a clear `pdf-no-extractor` event, and the extractor is dynamically imported the first time a PDF is actually seen — zero cost on non-PDF runs. To add it to an install that skipped it:
+PDF extraction uses [`pdfjs-dist`](https://github.com/mozilla/pdfjs-dist) — Mozilla's reference PDF.js library. Since v0.21 it ships as an **optional dependency**, so a default `npm install -g @askalf/deepdive` reads PDFs out of the box — the academic adapters (arxiv, pubmed, semanticscholar, openalex) surface PDFs constantly, and silently skipping them gutted exactly the queries those adapters exist for. It stays *optional* (pure JS, no build step) to keep the degradation graceful: installs with `--omit=optional` still get a fully working deepdive, PDFs are skipped with a clear `pdf-no-extractor` event, and the extractor is dynamically imported the first time a PDF is actually seen — zero cost on non-PDF runs.
+
+One honest caveat: `pdfjs-dist` 6.x declares `engines: node >=22.13`, and npm silently skips an optional dependency that fails the engine check. On Node 20–22.12 (Node 20 is past EOL) the auto-install doesn't happen; deepdive still runs fine, and `deepdive doctor` tells you under the `pdf` category. To add the extractor to an install that skipped it:
 
 ```bash
 npm install -g pdfjs-dist
 ```
-
-`deepdive doctor` reports the install state under the `pdf` category.
 
 **Local files** are ingested via `--include=<path>[,<path>]`. Each path may be a file or a directory (one level deep, supported extensions only). Files become pre-fetched sources at the head of the kept-sources list — they get the lowest `[N]` citation IDs, so they're most prominent to the synthesizer. Supported types: `.pdf`, `.md`, `.txt`, `.html`.
 
