@@ -32,7 +32,8 @@ export interface PdfExtractResult {
 export class PdfExtractorMissingError extends Error {
   constructor() {
     super(
-      "pdfjs-dist not installed — install with `npm install -g pdfjs-dist` to enable PDF source support",
+      "pdfjs-dist not installed (it ships as an optional dependency — was the install run with --omit=optional?) — " +
+        "install with `npm install -g pdfjs-dist` to enable PDF source support",
     );
     this.name = "PdfExtractorMissingError";
   }
