@@ -20,6 +20,10 @@ export interface RuntimeConfig {
   models: { plan: string; synth: string; critique: string };
   browser: BrowserOptions;
   searchAdapter: string;
+  // v0.20.0 — opt-in recovery adapter list ("wikipedia" / "wikipedia,arxiv").
+  // When a round's primary searches produce zero candidates, the round's
+  // queries re-run once through this adapter. Undefined = no fallback.
+  searchFallback?: string;
   resultsPerQuery: number;
   maxSources: number;
   maxWordsPerSource: number;
@@ -67,6 +71,7 @@ export interface CLIFlags {
   criticModel?: string;
   maxTokens?: number;
   search?: string;
+  searchFallback?: string;
   resultsPerQuery?: number;
   maxSources?: number;
   maxWordsPerSource?: number;
@@ -156,6 +161,11 @@ export function resolveConfig(
 
   const searchAdapter =
     flags.search ?? env.DEEPDIVE_SEARCH ?? DEFAULTS.searchAdapter;
+
+  const searchFallbackRaw =
+    flags.searchFallback ?? env.DEEPDIVE_SEARCH_FALLBACK ?? "";
+  const searchFallback =
+    searchFallbackRaw.trim().length > 0 ? searchFallbackRaw.trim() : undefined;
 
   const resultsPerQuery =
     flags.resultsPerQuery ??
@@ -308,6 +318,7 @@ export function resolveConfig(
       cdpEndpoint: flags.browserCdpEndpoint ?? env.DEEPDIVE_BROWSER_CDP_ENDPOINT,
     },
     searchAdapter,
+    searchFallback,
     resultsPerQuery,
     maxSources,
     maxWordsPerSource,

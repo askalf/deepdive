@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MultiSearch, interleaveResults } from "../dist/search/multi.js";
-import { resolveSearchAdapter } from "../dist/search.js";
+import { resolveSearchAdapter, normalizeAdapterList } from "../dist/search.js";
 
 const r = (url, rank = 1) => ({ url, title: "t", snippet: "", rank });
 
@@ -112,4 +112,26 @@ test("resolveSearchAdapter: unknown sub-adapter inside multi surfaces its error"
 
 test("resolveSearchAdapter: keyed sub-adapter inside multi still requires its key", async () => {
   await assert.rejects(() => resolveSearchAdapter("multi:duckduckgo,brave", {}), /DEEPDIVE_BRAVE_KEY/);
+});
+
+// ── normalizeAdapterList (pure) ──────────────────────────────────────────────
+
+test("normalizeAdapterList: single name passes through", () => {
+  assert.equal(normalizeAdapterList("wikipedia"), "wikipedia");
+  assert.equal(normalizeAdapterList(" Wikipedia "), "wikipedia");
+});
+
+test("normalizeAdapterList: comma list gains the multi: prefix", () => {
+  assert.equal(normalizeAdapterList("wikipedia,arxiv"), "multi:wikipedia,arxiv");
+  assert.equal(normalizeAdapterList("a, b , c"), "multi:a,b,c");
+});
+
+test("normalizeAdapterList: existing multi: spelling is preserved", () => {
+  assert.equal(normalizeAdapterList("multi:a,b"), "multi:a,b");
+});
+
+test("normalizeAdapterList: empty and comma-only input return undefined", () => {
+  assert.equal(normalizeAdapterList(""), undefined);
+  assert.equal(normalizeAdapterList("  "), undefined);
+  assert.equal(normalizeAdapterList(",,"), undefined);
 });

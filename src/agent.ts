@@ -75,6 +75,11 @@ export interface AgentConfig {
   // Ordering: include[] (local files) → preKept (saved) → search-fetched.
   preKept?: SourceWithContent[];
   search: SearchAdapter;
+  // v0.20.0 — opt-in recovery adapter. When a round's primary searches
+  // produce ZERO candidates (rate-limited, down, or genuinely empty), the
+  // round's queries are re-run once through this adapter before the
+  // zero-source guard fires. CLI: --search-fallback=wikipedia,arxiv.
+  fallbackSearch?: SearchAdapter;
   browser: BrowserOptions;
   resultsPerQuery: number;
   maxSources: number;
@@ -142,6 +147,9 @@ export type AgentEvent =
   // next query instead of killing the run; when rateLimited it also skips the
   // round's remaining queries (they'd hit the same limiter).
   | { type: "search.error"; query: string; message: string; rateLimited: boolean }
+  // v0.20.0 — the round's primary searches produced zero candidates and the
+  // configured fallback adapter is about to re-run the round's queries.
+  | { type: "search.fallback"; adapter: string; queries: string[] }
   | { type: "fetch.start"; url: string; cached: boolean }
   | {
       type: "fetch.done";
@@ -330,6 +338,62 @@ export async function runAgent(
   const keptShingles: Set<string>[] = [];
   const rounds: RoundTrace[] = [];
 
+  // One pass of a round's queries through an adapter. Mutates the shared
+  // candidate pool / seen-URL set / error log; used for the primary adapter
+  // every round and for the optional fallback adapter when the primary
+  // produced nothing.
+  async function runSearchPass(
+    adapter: SearchAdapter,
+    queries: string[],
+  ): Promise<void> {
+    for (const query of queries) {
+      if (signal?.aborted) throw new Error("aborted");
+      emit(config, { type: "search.start", query });
+      let results: SearchResult[];
+      try {
+        results = await adapter.search(query, config.resultsPerQuery, signal);
+      } catch (err) {
+        // A failed search shouldn't sink the round — record it, surface it
+        // as an event, and move on. The zero-source guard below catches the
+        // everything-failed case before any synthesis money is spent.
+        if (signal?.aborted) throw err;
+        const rateLimited = isRateLimitError(err);
+        const message = err instanceof Error ? err.message : String(err);
+        searchErrors.push({ query, message, rateLimited });
+        emit(config, { type: "search.error", query, message, rateLimited });
+        // The limiter that refused this query will refuse this pass's
+        // remaining queries too — skip them rather than hammer it.
+        if (rateLimited) break;
+        continue;
+      }
+      const fresh = dedupeByUrl(results).filter((r) => !seenUrls.has(r.url));
+      let kept = 0;
+      for (const r of fresh) {
+        seenUrls.add(r.url);
+        if (config.domainFilter) {
+          const verdict = classifyUrl(r.url, config.domainFilter);
+          if (verdict !== "allow") {
+            emit(config, {
+              type: "fetch.skipped",
+              url: r.url,
+              reason:
+                verdict === "deny-listed" ? "domain-deny" : "domain-not-allowed",
+            });
+            continue;
+          }
+        }
+        allCandidates.push({
+          url: r.url,
+          title: r.title,
+          snippet: r.snippet,
+          query,
+        });
+        kept++;
+      }
+      emit(config, { type: "search.done", query, count: kept });
+    }
+  }
+
   // Local file ingestion: pre-fetched sources are placed at the head of
   // the kept-sources list so they get the lowest [N] citation ids and
   // are most prominent to the synthesizer.
@@ -403,55 +467,18 @@ export async function runAgent(
       allQueries.push(...queriesForRound);
 
       const candidatesBefore = allCandidates.length;
-      for (const query of queriesForRound) {
-        if (signal?.aborted) throw new Error("aborted");
-        emit(config, { type: "search.start", query });
-        let results: SearchResult[];
-        try {
-          results = await config.search.search(
-            query,
-            config.resultsPerQuery,
-            signal,
-          );
-        } catch (err) {
-          // A failed search shouldn't sink the round — record it, surface it
-          // as an event, and move on. The zero-source guard below catches the
-          // everything-failed case before any synthesis money is spent.
-          if (signal?.aborted) throw err;
-          const rateLimited = isRateLimitError(err);
-          const message = err instanceof Error ? err.message : String(err);
-          searchErrors.push({ query, message, rateLimited });
-          emit(config, { type: "search.error", query, message, rateLimited });
-          // The limiter that refused this query will refuse the round's
-          // remaining queries too — skip them rather than hammer it.
-          if (rateLimited) break;
-          continue;
-        }
-        const fresh = dedupeByUrl(results).filter((r) => !seenUrls.has(r.url));
-        let kept = 0;
-        for (const r of fresh) {
-          seenUrls.add(r.url);
-          if (config.domainFilter) {
-            const verdict = classifyUrl(r.url, config.domainFilter);
-            if (verdict !== "allow") {
-              emit(config, {
-                type: "fetch.skipped",
-                url: r.url,
-                reason:
-                  verdict === "deny-listed" ? "domain-deny" : "domain-not-allowed",
-              });
-              continue;
-            }
-          }
-          allCandidates.push({
-            url: r.url,
-            title: r.title,
-            snippet: r.snippet,
-            query,
-          });
-          kept++;
-        }
-        emit(config, { type: "search.done", query, count: kept });
+      await runSearchPass(config.search, queriesForRound);
+      // Recovery pass: zero candidates from the primary (throttled, down, or
+      // genuinely empty) and a fallback is configured — re-run the round's
+      // queries through it once. Runs ALL the round's queries, including any
+      // the primary's rate-limit short-circuit skipped.
+      if (allCandidates.length === candidatesBefore && config.fallbackSearch) {
+        emit(config, {
+          type: "search.fallback",
+          adapter: config.fallbackSearch.name,
+          queries: queriesForRound,
+        });
+        await runSearchPass(config.fallbackSearch, queriesForRound);
       }
       const candidatesFoundThisRound = allCandidates.length - candidatesBefore;
 

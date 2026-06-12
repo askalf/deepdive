@@ -43,6 +43,7 @@ const KEY_MAP: Record<string, { env: string; kind: Kind }> = {
   criticModel: { env: "DEEPDIVE_CRITIC_MODEL", kind: "string" },
   maxTokens: { env: "DEEPDIVE_MAX_TOKENS", kind: "number" },
   search: { env: "DEEPDIVE_SEARCH", kind: "string" },
+  searchFallback: { env: "DEEPDIVE_SEARCH_FALLBACK", kind: "string" },
   resultsPerQuery: { env: "DEEPDIVE_RESULTS_PER_QUERY", kind: "number" },
   maxSources: { env: "DEEPDIVE_MAX_SOURCES", kind: "number" },
   maxWordsPerSource: { env: "DEEPDIVE_MAX_WORDS_PER_SOURCE", kind: "number" },

@@ -255,6 +255,154 @@ test("agent: candidates found but none fetchable → NoSourcesError names the fe
   }
 });
 
+test("agent: fallback adapter recovers a round whose primary produced nothing", async () => {
+  const planJson = '{"queries":["q1","q2"]}';
+  const synthText = "Recovered answer [1].";
+  const { server, calls } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const primary = { name: "empty", async search() { return []; } };
+  const fallbackQueried = [];
+  const fallback = {
+    name: "rescue",
+    async search(query) {
+      fallbackQueried.push(query);
+      return query === "q1"
+        ? [{ url: "https://ex.com/rescued", title: "Rescued", snippet: "", rank: 1 }]
+        : [];
+    },
+  };
+  const events = [];
+
+  try {
+    const result = await runAgent("q", {
+      ...BASE_CONFIG,
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search: primary,
+      fallbackSearch: fallback,
+      browserFactory: mockBrowserFactory({ "https://ex.com/rescued": { text: LOREM, title: "Rescued" } }),
+      onEvent: (e) => {
+        if (e.type === "search.fallback") events.push(e);
+      },
+    });
+    assert.equal(result.sources.length, 1);
+    assert.equal(result.sources[0].url, "https://ex.com/rescued");
+    assert.equal(calls.length, 2, "plan + synth — the run recovered");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].adapter, "rescue");
+    assert.deepEqual(events[0].queries, ["q1", "q2"]);
+    assert.deepEqual(fallbackQueried, ["q1", "q2"], "fallback ran ALL the round's queries");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: fallback is not consulted when the primary found candidates", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Answer [1].";
+  const { server } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const primary = {
+    name: "fine",
+    async search() {
+      return [{ url: "https://ex.com/primary", title: "P", snippet: "", rank: 1 }];
+    },
+  };
+  let fallbackCalls = 0;
+  const fallback = {
+    name: "rescue",
+    async search() {
+      fallbackCalls++;
+      return [];
+    },
+  };
+
+  try {
+    await runAgent("q", {
+      ...BASE_CONFIG,
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search: primary,
+      fallbackSearch: fallback,
+      browserFactory: mockBrowserFactory({ "https://ex.com/primary": { text: LOREM, title: "P" } }),
+    });
+    assert.equal(fallbackCalls, 0, "healthy primary — fallback never touched");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: rate-limited primary → fallback still runs the skipped queries", async () => {
+  // Primary rate-limits on q1, short-circuiting q2/q3. The fallback pass must
+  // still see all three queries — including the ones the primary skipped.
+  const planJson = '{"queries":["q1","q2","q3"]}';
+  const synthText = "Answer [1].";
+  const { server, calls } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  let primaryCalls = 0;
+  const primary = {
+    name: "throttled",
+    async search() {
+      primaryCalls++;
+      throw new SearchRateLimitError("throttled", "HTTP 403");
+    },
+  };
+  const fallbackQueried = [];
+  const fallback = {
+    name: "rescue",
+    async search(query) {
+      fallbackQueried.push(query);
+      return query === "q3"
+        ? [{ url: "https://ex.com/late", title: "Late", snippet: "", rank: 1 }]
+        : [];
+    },
+  };
+
+  try {
+    const result = await runAgent("q", {
+      ...BASE_CONFIG,
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search: primary,
+      fallbackSearch: fallback,
+      browserFactory: mockBrowserFactory({ "https://ex.com/late": { text: LOREM, title: "Late" } }),
+    });
+    assert.equal(primaryCalls, 1, "primary short-circuited after the rate limit");
+    assert.deepEqual(fallbackQueried, ["q1", "q2", "q3"]);
+    assert.equal(result.sources.length, 1);
+    assert.equal(calls.length, 2, "run recovered to a normal plan + synth");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: primary AND fallback empty still throws NoSourcesError", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const { server, calls } = makeLLMServer([planJson]);
+  const baseUrl = await startServer(server);
+
+  const empty = (name) => ({ name, async search() { return []; } });
+
+  try {
+    let err;
+    try {
+      await runAgent("q", {
+        ...BASE_CONFIG,
+        llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+        search: empty("primary"),
+        fallbackSearch: empty("rescue"),
+        browserFactory: mockBrowserFactory({}),
+      });
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err instanceof NoSourcesError);
+    assert.equal(calls.length, 1, "no synth call spent even with a fallback configured");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("multi: all sub-adapters rate-limited classifies as a rate limit", async () => {
   const limited = (name) => ({
     name,

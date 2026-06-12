@@ -21,6 +21,7 @@ export {
 export {
   resolveSearchAdapter,
   dedupeByUrl,
+  normalizeAdapterList,
   SearchRateLimitError,
   isRateLimitError,
   type SearchAdapter,
