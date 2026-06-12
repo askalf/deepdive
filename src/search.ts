@@ -31,6 +31,16 @@ export class SearchRateLimitError extends Error {
   }
 }
 
+// One sub-adapter's failure inside a fan-out (multi:) search whose other
+// backends still produced results. MultiSearch records these on
+// `lastFailures`; the agent surfaces them as a `search.degraded` event so a
+// silently throttled backend can't hide inside a partially-successful round.
+export interface SubAdapterFailure {
+  adapter: string;
+  message: string;
+  rateLimited: boolean;
+}
+
 // Duck-typed check (rather than bare instanceof) so a rate-limit error
 // still classifies correctly if two copies of this module are loaded
 // (e.g. a library consumer bundling their own deepdive build).

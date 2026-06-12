@@ -9,7 +9,7 @@
 // backed by an on-disk cache (src/cache.ts) so re-running a question is cheap.
 
 import { withModel, type LLMConfig } from "./llm.js";
-import type { SearchAdapter, SearchResult } from "./search.js";
+import type { SearchAdapter, SearchResult, SubAdapterFailure } from "./search.js";
 import { dedupeByUrl, isRateLimitError } from "./search.js";
 import { planQueries, critique, type Plan, type Critique } from "./plan.js";
 import { BrowserSession, type BrowserOptions, type FetchedPage } from "./browser.js";
@@ -150,6 +150,10 @@ export type AgentEvent =
   // v0.20.0 — the round's primary searches produced zero candidates and the
   // configured fallback adapter is about to re-run the round's queries.
   | { type: "search.fallback"; adapter: string; queries: string[] }
+  // v0.21.0 — a fan-out (multi:) search succeeded but one or more of its
+  // sub-adapters failed. Without this, a rate-limited backend hides inside
+  // multi's partial-failure tolerance and the source pool thins silently.
+  | { type: "search.degraded"; query: string; failures: SubAdapterFailure[] }
   | { type: "fetch.start"; url: string; cached: boolean }
   | {
       type: "fetch.done";
@@ -365,6 +369,13 @@ export async function runAgent(
         // remaining queries too — skip them rather than hammer it.
         if (rateLimited) break;
         continue;
+      }
+      // Partial degradation: a fan-out adapter that succeeded overall may
+      // still have lost sub-adapters (duck-read — MultiSearch exposes
+      // lastFailures; plain adapters don't have the field).
+      const partials = (adapter as { lastFailures?: SubAdapterFailure[] }).lastFailures;
+      if (Array.isArray(partials) && partials.length > 0) {
+        emit(config, { type: "search.degraded", query, failures: [...partials] });
       }
       const fresh = dedupeByUrl(results).filter((r) => !seenUrls.has(r.url));
       let kept = 0;

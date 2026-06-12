@@ -439,6 +439,8 @@ When a round gathers **zero** sources (backend throttled, every fetch blocked), 
 
 For unattended runs, add a recovery backend: `--search-fallback=wikipedia,arxiv` (env `DEEPDIVE_SEARCH_FALLBACK`, config key `searchFallback`) re-runs a round's queries through the fallback once when the primary produced zero candidates. Keyless adapters make good fallbacks — the run degrades to encyclopedia/paper sources instead of dying.
 
+Two more guarantees for unattended use: inside a `multi:` fan-out, a sub-adapter that fails is reported (`search.degraded` event, shown with `--verbose`) rather than silently thinning the source pool, and one that rate-limits is benched for the rest of the run instead of being re-asked. And `--max-runtime=10m` (env `DEEPDIVE_MAX_RUNTIME`; unit required) puts a wall-clock deadline on the whole run — if any stage wedges, the run aborts cleanly instead of hanging forever.
+
 ```bash
 deepdive "are transformer alternatives viable in 2026" \
   --search=multi:duckduckgo,arxiv,semanticscholar --deep

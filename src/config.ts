@@ -7,7 +7,7 @@ import type { LLMConfig } from "./llm.js";
 import type { BrowserOptions } from "./browser.js";
 import { parseDomainList, type DomainFilter } from "./domain-filter.js";
 import { detectApiFormat, type ApiFormat } from "./llm-format.js";
-import { defaultSessionsDir, normalizeTags } from "./sessions.js";
+import { defaultSessionsDir, normalizeTags, parseDuration } from "./sessions.js";
 import { parseMaxCost } from "./budget.js";
 import { resolveSince } from "./dates.js";
 
@@ -58,6 +58,12 @@ export interface RuntimeConfig {
   // The raw --since value (if any), so the CLI can distinguish "not set" from
   // "set but unparseable" and error on the latter.
   sinceRaw?: string;
+  // v0.21.0 — global wall-clock deadline for a research run (ms). When the
+  // deadline passes, the run aborts cleanly instead of hanging on a wedged
+  // stage. Undefined = no deadline. Set via --max-runtime / DEEPDIVE_MAX_RUNTIME.
+  maxRuntimeMs?: number;
+  // Raw --max-runtime value for the same set-but-unparseable distinction.
+  maxRuntimeRaw?: string;
 }
 
 export interface CLIFlags {
@@ -98,6 +104,7 @@ export interface CLIFlags {
   verbose?: boolean;
   tldr?: boolean;
   since?: string;
+  maxRuntime?: string;
   noDedupe?: boolean;
   dedupeThreshold?: number;
   tag?: string[];
@@ -280,6 +287,8 @@ export function resolveConfig(
   const tldr = flags.tldr ?? env.DEEPDIVE_TLDR === "1";
   const sinceRaw = flags.since ?? env.DEEPDIVE_SINCE;
   const sinceMs = sinceRaw ? resolveSince(sinceRaw) : undefined;
+  const maxRuntimeRaw = flags.maxRuntime ?? env.DEEPDIVE_MAX_RUNTIME;
+  const maxRuntimeMs = maxRuntimeRaw ? parseDuration(maxRuntimeRaw) : undefined;
   const tagsFromEnv = (env.DEEPDIVE_TAGS ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -344,6 +353,8 @@ export function resolveConfig(
     tags,
     sinceMs,
     sinceRaw,
+    maxRuntimeMs,
+    maxRuntimeRaw,
   };
 }
 

@@ -26,6 +26,7 @@ const FLAGS: [string, string][] = [
   ["--search-fallback", "recovery adapter(s) on empty rounds"],
   ["--profile", "named settings preset"],
   ["--max-cost", "budget cap in USD"],
+  ["--max-runtime", "global run deadline (90s, 10m, 1h)"],
   ["--max-sources", "total sources to fetch"],
   ["--concurrency", "parallel fetches"],
   ["--include", "local files/dirs as sources"],

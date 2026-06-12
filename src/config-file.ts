@@ -56,6 +56,7 @@ const KEY_MAP: Record<string, { env: string; kind: Kind }> = {
   citeMinRecall: { env: "DEEPDIVE_CITE_MIN_RECALL", kind: "number" },
   pdfMaxPages: { env: "DEEPDIVE_PDF_MAX_PAGES", kind: "number" },
   maxCost: { env: "DEEPDIVE_MAX_COST", kind: "string" }, // string: "$0.50" allowed
+  maxRuntime: { env: "DEEPDIVE_MAX_RUNTIME", kind: "string" }, // "10m", "1h"
   apiFormat: { env: "DEEPDIVE_API_FORMAT", kind: "string" },
   browserCdpEndpoint: { env: "DEEPDIVE_BROWSER_CDP_ENDPOINT", kind: "string" },
   wikipediaLang: { env: "DEEPDIVE_WIKIPEDIA_LANG", kind: "string" },

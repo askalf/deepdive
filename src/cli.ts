@@ -166,6 +166,10 @@ Flags:
                                 date (2024, 2024-06, 2024-06-15) or a duration
                                 (30d, 12h, 2w = that long ago). Sources with no
                                 detectable date are kept. Env: DEEPDIVE_SINCE.
+  --max-runtime=<dur>           Global wall-clock deadline for the whole run —
+                                abort cleanly instead of hanging on a wedged
+                                stage. Unit required: 90s, 10m, 1h.
+                                Env: DEEPDIVE_MAX_RUNTIME. Default: none.
   --no-dedupe                   Keep near-duplicate sources (syndicated copies of
                                 the same article). Default: drop them.
   --dedupe-threshold=<0..1>     Similarity above which a source counts as a
@@ -208,7 +212,7 @@ Environment:
   DEEPDIVE_INCLUDE, DEEPDIVE_PDF_MAX_PAGES,
   DEEPDIVE_ALLOW_DOMAIN, DEEPDIVE_DENY_DOMAIN, DEEPDIVE_SINCE, DEEPDIVE_API_FORMAT,
   DEEPDIVE_NO_DEDUPE, DEEPDIVE_DEDUPE_THRESHOLD, DEEPDIVE_TAGS,
-  DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR, DEEPDIVE_CONFIG,
+  DEEPDIVE_NO_SESSIONS, DEEPDIVE_SESSIONS_DIR, DEEPDIVE_CONFIG, DEEPDIVE_MAX_RUNTIME,
   DEEPDIVE_DDG_DELAY_MS (spacing between DuckDuckGo requests; default 1000, 0 disables)
 
 Exit codes:
@@ -460,6 +464,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
         case "since":
           flags.since = value;
           break;
+        case "max-runtime":
+          flags.maxRuntime = value;
+          break;
         case "format":
           flags.format = value.toLowerCase();
           break;
@@ -535,6 +542,12 @@ function renderEvent(e: AgentEvent): string {
       }`;
     case "search.fallback":
       return `  search  primary adapter produced nothing — retrying the round via ${e.adapter}`;
+    case "search.degraded": {
+      const parts = e.failures.map(
+        (f) => `${f.adapter} ${f.rateLimited ? "rate-limited" : "failed"}`,
+      );
+      return `  search  ⚠ degraded — ${parts.join(", ")} (continuing with the remaining backends)`;
+    }
     case "fetch.start":
       return `  fetch   ${e.cached ? "(cached) " : ""}${e.url}`;
     case "fetch.done":
@@ -926,6 +939,19 @@ async function runResearch(
     );
     return { code: 2 };
   }
+  // A unit is REQUIRED for --max-runtime (and restricted to s/m/h): the
+  // shared duration parser defaults bare numbers to days, and a silent
+  // "--max-runtime=300 → 300 days" would be worse than no deadline at all.
+  if (
+    config.maxRuntimeRaw &&
+    (config.maxRuntimeMs === undefined ||
+      !/^\s*\d+\s*[smh]\s*$/i.test(config.maxRuntimeRaw))
+  ) {
+    process.stderr.write(
+      `deepdive: --max-runtime must be a duration with an s/m/h unit (90s, 10m, 1h); got: ${config.maxRuntimeRaw}\n`,
+    );
+    return { code: 2 };
+  }
   // Adapter resolution can fail on user input (unknown name, missing key) —
   // exit 2 with the message rather than an unhandled rejection.
   let search: import("./search.js").SearchAdapter;
@@ -954,6 +980,31 @@ async function runResearch(
   const sigint = () => ac.abort();
   process.on("SIGINT", sigint);
   process.on("SIGTERM", sigint);
+
+  // v0.21.0 — global wall-clock deadline (--max-runtime). Two layers:
+  // 1. Graceful: the run signal aborts at the deadline, so searches, LLM
+  //    calls, and loop boundaries unwind normally and the browser closes.
+  // 2. Backstop: a hard process.exit fires 15s later in case the run is
+  //    wedged somewhere the signal can't reach (e.g. a stuck Playwright
+  //    navigation — observed in the wild as an indefinite hang). unref'd so
+  //    it never delays a normal exit.
+  let deadlineHit = false;
+  let backstop: ReturnType<typeof setTimeout> | undefined;
+  let runSignal: AbortSignal = ac.signal;
+  if (config.maxRuntimeMs !== undefined) {
+    const deadline = AbortSignal.timeout(config.maxRuntimeMs);
+    deadline.addEventListener("abort", () => {
+      deadlineHit = true;
+    });
+    runSignal = AbortSignal.any([ac.signal, deadline]);
+    backstop = setTimeout(() => {
+      process.stderr.write(
+        `deepdive: run exceeded --max-runtime=${config.maxRuntimeRaw} and did not unwind cleanly — forcing exit\n`,
+      );
+      process.exit(1);
+    }, config.maxRuntimeMs + 15_000);
+    backstop.unref?.();
+  }
 
   // Live-streaming requires an attached TTY: escape sequences, partial line
   // writes, and interactive buffering behave weirdly when stdout is a pipe.
@@ -1022,7 +1073,7 @@ async function runResearch(
             }
           : undefined,
       },
-      ac.signal,
+      runSignal,
     );
 
     const citeFooter = renderCitationHealthFooter(result.verification);
@@ -1136,9 +1187,19 @@ async function runResearch(
       process.stderr.write(renderNoSourcesMessage(err) + "\n");
       return { code: 3 };
     }
+    // v0.21.0 — the global deadline aborted the run. Whatever shape the
+    // unwound error took (generic "aborted", a TimeoutError DOMException),
+    // name the actual cause.
+    if (deadlineHit) {
+      process.stderr.write(
+        `deepdive: run exceeded --max-runtime=${config.maxRuntimeRaw} — aborted cleanly\n`,
+      );
+      return { code: 1 };
+    }
     process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
     return { code: 1 };
   } finally {
+    if (backstop !== undefined) clearTimeout(backstop);
     process.off("SIGINT", sigint);
     process.off("SIGTERM", sigint);
   }

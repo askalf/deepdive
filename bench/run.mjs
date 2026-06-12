@@ -127,7 +127,9 @@ export function renderScoreboard(rows, meta) {
 
 function runOne(q, extraArgs) {
   return new Promise((resolveRun) => {
-    const args = [CLI, q.question, "--json", "--no-sessions", ...(q.args ?? []), ...extraArgs];
+    // --max-runtime: a wedged stage must fail the gate, not hang the bench
+    // (observed once in the wild before the deadline existed).
+    const args = [CLI, q.question, "--json", "--no-sessions", "--max-runtime=8m", ...(q.args ?? []), ...extraArgs];
     const started = Date.now();
     const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";

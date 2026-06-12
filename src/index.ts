@@ -26,6 +26,7 @@ export {
   isRateLimitError,
   type SearchAdapter,
   type SearchResult,
+  type SubAdapterFailure,
 } from "./search.js";
 export { BrowserSession, type BrowserOptions, type FetchedPage } from "./browser.js";
 export { extractContent, type ExtractedContent } from "./extract.js";
