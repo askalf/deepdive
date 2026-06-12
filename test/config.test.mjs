@@ -43,6 +43,23 @@ test("resolveConfig: searchFallback defaults to wikipedia (v0.22.0)", () => {
   assert.equal(c.searchFallback, "wikipedia");
 });
 
+test("resolveConfig: --since makes the searchFallback default news,wikipedia (v0.24.0)", () => {
+  assert.equal(resolveConfig({ since: "180d" }, {}).searchFallback, "news,wikipedia");
+  assert.equal(resolveConfig({}, { DEEPDIVE_SINCE: "30d" }).searchFallback, "news,wikipedia");
+});
+
+test("resolveConfig: explicit searchFallback wins over the recency default", () => {
+  assert.equal(
+    resolveConfig({ since: "180d", searchFallback: "arxiv" }, {}).searchFallback,
+    "arxiv",
+  );
+  assert.equal(
+    resolveConfig({ since: "180d" }, { DEEPDIVE_SEARCH_FALLBACK: "wikipedia" }).searchFallback,
+    "wikipedia",
+  );
+  assert.equal(resolveConfig({ since: "180d", searchFallback: "none" }, {}).searchFallback, undefined);
+});
+
 test("resolveConfig: searchFallback 'none'/'off' disables the default", () => {
   assert.equal(resolveConfig({ searchFallback: "none" }, {}).searchFallback, undefined);
   assert.equal(resolveConfig({ searchFallback: "OFF" }, {}).searchFallback, undefined);
