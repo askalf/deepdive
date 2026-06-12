@@ -20,26 +20,75 @@ export interface Critique {
   queries: string[];
 }
 
-const PLANNER_SYSTEM = `You are a research planner. Given a user's question, produce 3-5 specific, searchable sub-queries that together will gather the evidence needed to answer it well.
+/**
+ * Date grounding for the planner/critic prompts. Without it the model
+ * anchors "recent"/"latest" to its TRAINING-time sense of now and writes
+ * stale queries — and when `--since` is in play, the recency filter then
+ * culls most of what those stale queries return (the v0.23.0 bench
+ * "recent" failure: 1 source kept against a 3-source minimum).
+ */
+export interface PlanContext {
+  /** Epoch ms for "today". Defaults to Date.now(); injectable for tests. */
+  now?: number;
+  /**
+   * Resolved `--since` cutoff (epoch ms). When set, the prompts disclose
+   * that sources published before it are dropped, so queries get shaped
+   * to the surviving window instead of the model's idea of "recent".
+   */
+  sinceMs?: number;
+}
+
+function fmtDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+// Shared between planner and critic. Two failure modes balance here:
+// relative recency words ("latest") rank stale evergreen pages because
+// search engines match text, not intent — but bare year tokens distort
+// keyword-matched sources (arXiv/OpenAlex/code search), measured as a
+// 0.68 → 0.44 citation-support drop on the bench's scholarly question
+// when every sub-query got year-anchored. So: anchor event-shaped
+// sub-queries only, keep conceptual ones timeless.
+function recencyRules(now: number, sinceMs?: number): string {
+  let s = `- For sub-queries about time-bound events (releases, announcements, news, versions, "what changed"), use absolute dates derived from today's date — the current year, month + year, or the window's endpoints — instead of relative words like "latest" or "recent", which rank stale evergreen pages.
+- Keep conceptual, scholarly, and how-does-X-work sub-queries timeless: bare year tokens distort keyword-matched scholarly and code search, so do not append years to them.`;
+  // Firm wording is safe here: this line only fires when the user passed
+  // --since, i.e. explicitly demanded freshness — unlike the rules above,
+  // it can't leak year tokens into runs that never asked for recency.
+  if (sinceMs !== undefined) {
+    s += `\n- A freshness filter will DROP every source published before ${fmtDay(sinceMs)}. Shape every sub-query to surface content published after that date.`;
+  }
+  return s;
+}
+
+// Exported for unit tests.
+export function plannerSystem(ctx: PlanContext = {}): string {
+  const now = ctx.now ?? Date.now();
+  return `You are a research planner. Given a user's question, produce 3-5 specific, searchable sub-queries that together will gather the evidence needed to answer it well.
+
+Today's date: ${fmtDay(now)}.
 
 Rules:
 - Each sub-query must be a concrete phrase someone would type into a search engine.
 - Cover distinct facets of the question (definition, how it works, pros/cons, recent changes, alternatives, etc.) — do not list near-duplicates.
 - Prefer specific terminology over vague phrasing.
 - Do not include the user's exact question verbatim unless it is already search-engine-shaped.
+${recencyRules(now, ctx.sinceMs)}
 
 Output FORMAT (strict): one JSON object, no prose before or after, matching:
 {"reasoning": "<1-2 sentences on your decomposition>", "queries": ["q1", "q2", ...]}`;
+}
 
 export async function planQueries(
   question: string,
   config: LLMConfig,
   signal?: AbortSignal,
   onUsage?: UsageSink,
+  ctx: PlanContext = {},
 ): Promise<Plan> {
   const { text, usage } = await callLLM(
     [{ role: "user", content: question }],
-    PLANNER_SYSTEM,
+    plannerSystem(ctx),
     config,
     signal,
   );
@@ -67,7 +116,12 @@ export function parsePlan(raw: string): Plan {
   };
 }
 
-const CRITIC_SYSTEM = `You are a research critic reviewing a draft answer to a user's question.
+// Exported for unit tests.
+export function criticSystem(ctx: PlanContext = {}): string {
+  const now = ctx.now ?? Date.now();
+  return `You are a research critic reviewing a draft answer to a user's question.
+
+Today's date: ${fmtDay(now)}.
 
 You will receive:
 1. The original question.
@@ -84,9 +138,11 @@ Rules:
 - Prefer queries targeting specific unanswered facts over generic re-searches.
 - When weakly-supported sentences are flagged, prioritize queries that would find authoritative sources for those exact claims.
 - Keep the number of new queries minimal — fewer, sharper queries beat more, vaguer ones.
+${recencyRules(now, ctx.sinceMs)}
 
 Output FORMAT (strict): one JSON object, no prose before or after, matching:
 {"done": bool, "reasoning": "<1-2 sentences>", "queries": ["q1", "q2", ...]}`;
+}
 
 export interface WeakCite {
   sentence: string;
@@ -101,6 +157,7 @@ export async function critique(
   signal?: AbortSignal,
   onUsage?: UsageSink,
   weakCites: WeakCite[] = [],
+  ctx: PlanContext = {},
 ): Promise<Critique> {
   const weakSection =
     weakCites.length > 0
@@ -121,7 +178,7 @@ export async function critique(
     `\n\nReview the draft and propose follow-up queries if needed.`;
   const { text, usage } = await callLLM(
     [{ role: "user", content: userMessage }],
-    CRITIC_SYSTEM,
+    criticSystem(ctx),
     config,
     signal,
   );
