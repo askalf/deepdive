@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-06-12
+
+### Fixed — the fetch-stage wedge (#87)
+
+- **A single unresponsive page can no longer hang the whole run.** Root cause of the observed 18-minute idle wedge: the per-fetch page work includes Playwright calls the per-call timeouts cannot cover — `page.evaluate` accepts no timeout, so a renderer main thread blocked after `domcontentloaded` (a dialog, `window.print()`, a never-settling document) left the fetch promise pending forever and the concurrency slot never freed. `fetch()` now races the entire page lifecycle against a hard deadline (2× the fetch timeout + 10s — only reachable when the per-call timeouts have already failed to fire); on expiry the page is force-closed without being awaited and the run records one failed fetch and continues. The browser context also gets `setDefaultTimeout(timeoutMs)` so every timeout-accepting protocol call is bounded by the configured fetch timeout instead of Playwright's 30s default. New `FetchWedgeError` + `withHardDeadline` pinned by `test/fetch-wedge.test.mjs`.
+
 ## [0.25.0] - 2026-06-12
 
 ### Changed — date-grounded planner and critic
