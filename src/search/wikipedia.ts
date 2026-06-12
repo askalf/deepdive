@@ -9,6 +9,7 @@
 // the downstream extract/synthesis path identical across adapters.
 
 import { searchTimeoutSignal, type SearchAdapter, type SearchResult } from "../search.js";
+import { keywordLadder } from "../query-keywords.js";
 import { stripTags, decodeHtmlEntities } from "./duckduckgo.js";
 
 interface WikiSearchItem {
@@ -22,6 +23,26 @@ export class WikipediaSearch implements SearchAdapter {
   constructor(private readonly lang: string = "en") {}
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    // MediaWiki search matches article titles/text, so the planner's long
+    // natural-language queries routinely return zero (#86 — this hollowed
+    // out wikipedia's value as the default fallback). When the verbatim
+    // query finds nothing, walk progressively shorter keyword variants
+    // (4 → 2 → 1 leading keywords) until one hits. At most 3 extra calls
+    // against a keyless API, and only on the would-have-been-empty path.
+    const verbatim = await this.searchRaw(query, limit, signal);
+    if (verbatim.length > 0) return verbatim;
+    for (const variant of keywordLadder(query)) {
+      const results = await this.searchRaw(variant, limit, signal);
+      if (results.length > 0) return results;
+    }
+    return [];
+  }
+
+  private async searchRaw(
+    query: string,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
     const url = new URL(`https://${this.lang}.wikipedia.org/w/api.php`);
     url.searchParams.set("action", "query");
     url.searchParams.set("list", "search");
