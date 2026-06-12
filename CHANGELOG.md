@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-06-12
+
+### Added — Wikipedia keyword ladder (the fallback actually lands now)
+
+- **Zero-result Wikipedia queries retry with progressively shorter keyword variants** (4 → 2 → 1 leading content tokens; new pure `src/query-keywords.ts` drops stopwords and generic instruction words while keeping technical tokens like `HTTP/3`, `php-fpm`, `fastcgi_buffer_size` intact). MediaWiki search matches article titles/text and returned zero for the planner's long natural-language queries — which hollowed out wikipedia exactly where it matters most: as the default fallback when the primary backend is rate-limited. Both stress benches died on this exact gap. At most 3 extra keyless API calls, only on the would-have-been-empty path; verbatim hits are untouched. Applies to all wikipedia usage (direct, `multi:` sub-adapter, fallback). New exports: `extractKeywords`, `keywordLadder`.
+- Checked in: the 2026-06-12 healthy-DDG bench scoreboard (4/6 PASS at v0.22.0 — the two failures were this gap; DDG re-throttled mid-bench and the un-laddered fallback came back empty).
+
+### Upstream note
+
+- The morning's "planner did not return JSON" failures on default runs were **not** a deepdive bug: an upstream serving-side shift made `claude-sonnet-4-6` ignore client system prompts bare-appended after dario's CC persona. Fixed in dario **4.8.66** (`CLIENT_SYSTEM_PREFACE` precedence framing). deepdive users on dario should upgrade: `npm i -g @askalf/dario`.
+
 ## [0.22.0] - 2026-06-11
 
 ### Changed — search fallback defaults ON (`wikipedia`)
