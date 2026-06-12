@@ -115,12 +115,12 @@ Flags:
                                 Env: DEEPDIVE_MAX_COST. Exit code 2 on cap-hit.
   --max-tokens=<n>              Output max tokens per LLM call. Default: 4096
   --search=<adapter>            Search adapter: duckduckgo | searxng | brave | tavily | exa |
-                                auto | wikipedia | arxiv | github | hackernews |
+                                auto | wikipedia | news | arxiv | github | hackernews |
                                 stackexchange | pubmed | semanticscholar | openalex |
                                 multi:<a>,<b>[,...]
-                                Default: duckduckgo (no key required). wikipedia, arxiv,
-                                hackernews, stackexchange, pubmed, semanticscholar, and
-                                openalex need no key; github works keyless
+                                Default: duckduckgo (no key required). wikipedia, news,
+                                arxiv, hackernews, stackexchange, pubmed, semanticscholar,
+                                and openalex need no key; github works keyless
                                 (DEEPDIVE_GITHUB_TOKEN raises the limit). 'auto' runs DDG
                                 first, Brave fallback (if DEEPDIVE_BRAVE_KEY). multi:
                                 fans out to several adapters concurrently and interleaves
@@ -130,7 +130,10 @@ Flags:
                                 rate-limited). Comma list fans out: e.g.
                                 --search-fallback=wikipedia,arxiv.
                                 Env: DEEPDIVE_SEARCH_FALLBACK.
-                                Default: wikipedia (keyless). =none disables.
+                                Default: wikipedia (keyless); with --since the
+                                default becomes news,wikipedia so a throttled
+                                primary degrades into dated, fresh sources.
+                                =none disables.
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000

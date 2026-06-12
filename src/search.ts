@@ -126,6 +126,10 @@ export async function resolveSearchAdapter(
       const { ArxivSearch } = await import("./search/arxiv.js");
       return new ArxivSearch();
     }
+    case "news": {
+      const { NewsSearch } = await import("./search/news.js");
+      return new NewsSearch();
+    }
     case "github": {
       // Token is optional — unauthenticated search works at a lower rate
       // limit. DEEPDIVE_GITHUB_TOKEN raises it.
