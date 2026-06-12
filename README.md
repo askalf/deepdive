@@ -437,6 +437,8 @@ The fan-out is how the adapter fleet composes: one general-web engine plus one o
 
 When a round gathers **zero** sources (backend throttled, every fetch blocked), deepdive stops *before* the synthesis LLM call and exits with code `3` and a message naming the cause — it never spends tokens producing a citation-free "unable to answer".
 
+For unattended runs, add a recovery backend: `--search-fallback=wikipedia,arxiv` (env `DEEPDIVE_SEARCH_FALLBACK`, config key `searchFallback`) re-runs a round's queries through the fallback once when the primary produced zero candidates. Keyless adapters make good fallbacks — the run degrades to encyclopedia/paper sources instead of dying.
+
 ```bash
 deepdive "are transformer alternatives viable in 2026" \
   --search=multi:duckduckgo,arxiv,semanticscholar --deep

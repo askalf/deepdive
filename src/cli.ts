@@ -63,7 +63,9 @@ import {
   renderDoctorJson,
   exitCodeFor,
   scrubPath,
+  readDeepdiveVersion,
 } from "./doctor.js";
+import { normalizeAdapterList } from "./search.js";
 
 const USAGE = `deepdive — local research agent
 
@@ -123,6 +125,11 @@ Flags:
                                 first, Brave fallback (if DEEPDIVE_BRAVE_KEY). multi:
                                 fans out to several adapters concurrently and interleaves
                                 results (e.g. multi:duckduckgo,wikipedia,arxiv).
+  --search-fallback=<adapters>  Recovery backend(s) tried once when a round's
+                                primary searches produce zero candidates (e.g.
+                                rate-limited). Comma list fans out: e.g.
+                                --search-fallback=wikipedia,arxiv.
+                                Env: DEEPDIVE_SEARCH_FALLBACK. Default: none.
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
@@ -183,10 +190,12 @@ Flags:
                                 tokens to stdout (auto-off for --json and
                                 non-TTY stdout)
   --no-sessions                 Do not persist this run to ~/.deepdive/sessions/
+  --version, -V                 Print the deepdive version and exit
   --help, -h                    Show this help
 
 Environment:
   DEEPDIVE_BASE_URL, DEEPDIVE_API_KEY, DEEPDIVE_MODEL, DEEPDIVE_SEARCH,
+  DEEPDIVE_SEARCH_FALLBACK,
   DEEPDIVE_SEARXNG_URL, DEEPDIVE_BRAVE_KEY, DEEPDIVE_TAVILY_KEY, DEEPDIVE_EXA_KEY,
   DEEPDIVE_WIKIPEDIA_LANG, DEEPDIVE_GITHUB_TOKEN, DEEPDIVE_STACKEXCHANGE_SITE,
   DEEPDIVE_S2_KEY, DEEPDIVE_OPENALEX_MAILTO,
@@ -225,6 +234,7 @@ interface ParsedArgs {
   outPath?: string;
   flags: CLIFlags;
   help: boolean;
+  version: boolean;
 }
 
 // Verbs that accept additional positional arguments. Anything else
@@ -252,10 +262,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const extras: string[] = [];
   let outPath: string | undefined;
   let help = false;
+  let version = false;
 
   for (const a of argv) {
     if (a === "--help" || a === "-h") {
       help = true;
+      continue;
+    }
+    if (a === "--version" || a === "-V") {
+      version = true;
       continue;
     }
     if (a === "--verbose" || a === "-v") {
@@ -353,6 +368,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "search":
           flags.search = value.toLowerCase();
+          break;
+        case "search-fallback":
+          flags.searchFallback = value.toLowerCase();
           break;
         case "results-per-query":
           flags.resultsPerQuery = parsePositiveInt(value);
@@ -478,7 +496,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     );
   }
 
-  return { question, extras, outPath, flags, help };
+  return { question, extras, outPath, flags, help, version };
 }
 
 function parsePositiveInt(s: string): number | undefined {
@@ -515,6 +533,8 @@ function renderEvent(e: AgentEvent): string {
       return `  search  ⚠ ${e.rateLimited ? "rate-limited" : "failed"} — ${e.message}${
         e.rateLimited ? " (skipping this round's remaining queries)" : ""
       }`;
+    case "search.fallback":
+      return `  search  primary adapter produced nothing — retrying the round via ${e.adapter}`;
     case "fetch.start":
       return `  fetch   ${e.cached ? "(cached) " : ""}${e.url}`;
     case "fetch.done":
@@ -672,6 +692,11 @@ async function main(argv: string[]): Promise<number> {
   }
   if (parsed.help) {
     process.stdout.write(USAGE);
+    return 0;
+  }
+  if (parsed.version) {
+    // Bare version, no prefix — script-friendly (`deepdive --version` in CI).
+    process.stdout.write((await readDeepdiveVersion()) + "\n");
     return 0;
   }
   // `completion` needs no config; everything else gets config-file + profile
@@ -901,7 +926,26 @@ async function runResearch(
     );
     return { code: 2 };
   }
-  const search = await resolveSearchAdapter(config.searchAdapter, process.env);
+  // Adapter resolution can fail on user input (unknown name, missing key) —
+  // exit 2 with the message rather than an unhandled rejection.
+  let search: import("./search.js").SearchAdapter;
+  let fallbackSearch: import("./search.js").SearchAdapter | undefined;
+  try {
+    search = await resolveSearchAdapter(config.searchAdapter, process.env);
+    if (config.searchFallback) {
+      const fallbackName = normalizeAdapterList(config.searchFallback);
+      if (fallbackName && fallbackName !== config.searchAdapter) {
+        fallbackSearch = await resolveSearchAdapter(fallbackName, process.env);
+      } else if (fallbackName === config.searchAdapter) {
+        process.stderr.write(
+          `deepdive: warning: --search-fallback matches --search (${fallbackName}); ignoring the fallback\n`,
+        );
+      }
+    }
+  } catch (err) {
+    process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
+    return { code: 2 };
+  }
   const cache = config.cache.enabled
     ? createCache({ dir: config.cache.dir, ttlMs: config.cache.ttlMs })
     : undefined;
@@ -932,6 +976,7 @@ async function runResearch(
         maxCostUsd: config.maxCostUsd,
         preKept,
         search,
+        fallbackSearch,
         browser: config.browser,
         resultsPerQuery: config.resultsPerQuery,
         maxSources: config.maxSources,

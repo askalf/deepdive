@@ -611,7 +611,8 @@ function clip(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
-async function readDeepdiveVersion(): Promise<string> {
+// Exported — also serves the CLI's --version flag.
+export async function readDeepdiveVersion(): Promise<string> {
   try {
     const here = dirname(fileURLToPath(import.meta.url));
     // dist/doctor.js → dist/../package.json

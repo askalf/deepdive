@@ -23,6 +23,7 @@ const FLAGS: [string, string][] = [
   ["--synth-model", "model for the synthesizer stage"],
   ["--critic-model", "model for the critic stage"],
   ["--search", "search adapter"],
+  ["--search-fallback", "recovery adapter(s) on empty rounds"],
   ["--profile", "named settings preset"],
   ["--max-cost", "budget cap in USD"],
   ["--max-sources", "total sources to fetch"],
@@ -39,6 +40,7 @@ const FLAGS: [string, string][] = [
   ["--out", "write output to a file"],
   ["--json", "emit JSON"],
   ["--verbose", "stream progress to stderr"],
+  ["--version", "print version"],
   ["--help", "show help"],
 ];
 

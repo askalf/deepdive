@@ -169,6 +169,23 @@ export async function resolveSearchAdapter(
   }
 }
 
+// Normalize a user-supplied adapter list ("wikipedia" / "wikipedia,arxiv" /
+// "multi:wikipedia,arxiv") into a single resolvable adapter name: a bare
+// comma list gets the multi: prefix, a single name passes through. Returns
+// undefined for empty input. Used by --search-fallback so users don't have
+// to know the multi: spelling.
+export function normalizeAdapterList(value: string): string | undefined {
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed.length === 0) return undefined;
+  if (trimmed.startsWith("multi:")) return trimmed;
+  const parts = trimmed
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (parts.length === 0) return undefined;
+  return parts.length === 1 ? parts[0] : `multi:${parts.join(",")}`;
+}
+
 export function dedupeByUrl(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   const out: SearchResult[] = [];

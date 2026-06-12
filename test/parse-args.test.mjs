@@ -44,6 +44,17 @@ test("parseArgs: --search=NAME is lowercased", () => {
   assert.equal(p.flags.search, "brave");
 });
 
+test("parseArgs: --version and -V recognized", () => {
+  assert.equal(parseArgs(["--version"]).version, true);
+  assert.equal(parseArgs(["-V"]).version, true);
+  assert.equal(parseArgs(["q"]).version, false);
+});
+
+test("parseArgs: --search-fallback=LIST is lowercased and captured", () => {
+  const p = parseArgs(["q", "--search-fallback=Wikipedia,ARXIV"]);
+  assert.equal(p.flags.searchFallback, "wikipedia,arxiv");
+});
+
 test("parseArgs: unknown --flag throws", () => {
   assert.throws(() => parseArgs(["q", "--what=no"]), /unknown flag/);
 });

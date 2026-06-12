@@ -38,6 +38,28 @@ test("resolveConfig: numeric env with junk ignored, falls back to default", () =
   assert.equal(c.maxSources, 12);
 });
 
+test("resolveConfig: searchFallback defaults to undefined", () => {
+  const c = resolveConfig({}, {});
+  assert.equal(c.searchFallback, undefined);
+});
+
+test("resolveConfig: searchFallback from flag, env, and flag-over-env", () => {
+  assert.equal(resolveConfig({ searchFallback: "wikipedia" }, {}).searchFallback, "wikipedia");
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_SEARCH_FALLBACK: "wikipedia,arxiv" }).searchFallback,
+    "wikipedia,arxiv",
+  );
+  assert.equal(
+    resolveConfig({ searchFallback: "brave" }, { DEEPDIVE_SEARCH_FALLBACK: "wikipedia" }).searchFallback,
+    "brave",
+  );
+});
+
+test("resolveConfig: blank searchFallback env treated as unset", () => {
+  const c = resolveConfig({}, { DEEPDIVE_SEARCH_FALLBACK: "  " });
+  assert.equal(c.searchFallback, undefined);
+});
+
 test("resolveConfig: DEEPDIVE_VERBOSE=1 flips verbose", () => {
   const c = resolveConfig({}, { DEEPDIVE_VERBOSE: "1" });
   assert.equal(c.verbose, true);
