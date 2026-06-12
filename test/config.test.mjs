@@ -38,9 +38,18 @@ test("resolveConfig: numeric env with junk ignored, falls back to default", () =
   assert.equal(c.maxSources, 12);
 });
 
-test("resolveConfig: searchFallback defaults to undefined", () => {
+test("resolveConfig: searchFallback defaults to wikipedia (v0.22.0)", () => {
   const c = resolveConfig({}, {});
-  assert.equal(c.searchFallback, undefined);
+  assert.equal(c.searchFallback, "wikipedia");
+});
+
+test("resolveConfig: searchFallback 'none'/'off' disables the default", () => {
+  assert.equal(resolveConfig({ searchFallback: "none" }, {}).searchFallback, undefined);
+  assert.equal(resolveConfig({ searchFallback: "OFF" }, {}).searchFallback, undefined);
+  assert.equal(
+    resolveConfig({}, { DEEPDIVE_SEARCH_FALLBACK: "none" }).searchFallback,
+    undefined,
+  );
 });
 
 test("resolveConfig: searchFallback from flag, env, and flag-over-env", () => {

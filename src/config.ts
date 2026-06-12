@@ -135,6 +135,7 @@ const DEFAULTS = {
   model: "claude-sonnet-4-6",
   maxTokens: 4096,
   searchAdapter: "duckduckgo",
+  searchFallback: "wikipedia",
   resultsPerQuery: 5,
   maxSources: 12,
   maxWordsPerSource: 2000,
@@ -169,10 +170,21 @@ export function resolveConfig(
   const searchAdapter =
     flags.search ?? env.DEEPDIVE_SEARCH ?? DEFAULTS.searchAdapter;
 
+  // v0.22.0 — fallback defaults ON (wikipedia: keyless, reliable, never the
+  // primary's failure mode). Live bench data drove this: with DDG
+  // rate-limiting the box's IP, 5/6 default-config questions died with zero
+  // sources while every multi-backend run passed. A default run should
+  // degrade visibly (search.fallback notice) rather than die. "none"/"off"
+  // (or blank) disables.
   const searchFallbackRaw =
-    flags.searchFallback ?? env.DEEPDIVE_SEARCH_FALLBACK ?? "";
+    flags.searchFallback ?? env.DEEPDIVE_SEARCH_FALLBACK ?? DEFAULTS.searchFallback;
+  const searchFallbackNorm = searchFallbackRaw.trim().toLowerCase();
   const searchFallback =
-    searchFallbackRaw.trim().length > 0 ? searchFallbackRaw.trim() : undefined;
+    searchFallbackNorm.length === 0 ||
+    searchFallbackNorm === "none" ||
+    searchFallbackNorm === "off"
+      ? undefined
+      : searchFallbackRaw.trim();
 
   const resultsPerQuery =
     flags.resultsPerQuery ??
