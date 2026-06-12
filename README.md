@@ -424,6 +424,7 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 | Exa | `--search=exa` | `DEEPDIVE_EXA_KEY` | Neural search tuned for long, intent-rich queries — a fit for the kind of sub-queries the planner and critic loop generate. Highlights only; deepdive re-fetches the page for full content. |
 | Auto | `--search=auto` | `DEEPDIVE_BRAVE_KEY` (optional) | DDG primary, Brave fallback on DDG failure or empty results. Degrades to DDG-only when no Brave key is set. |
 | Wikipedia | `--search=wikipedia` | nothing | Encyclopedia-first. Best for definitional / factual sub-queries. Language via `DEEPDIVE_WIKIPEDIA_LANG` (default `en`). |
+| News | `--search=news` | nothing | Recent, dated news articles via the Bing News RSS feed. Best for recency-sensitive questions; pairs with `--since`. Result links are unwrapped to the publisher URL, and each snippet is prefixed with the article date. |
 | arXiv | `--search=arxiv` | nothing | Research-paper / preprint search via the arXiv API. Kept sources are abstract pages; the PDF path handles linked PDFs. |
 | GitHub | `--search=github` | `DEEPDIVE_GITHUB_TOKEN` (optional) | Repository search — "what project does X". Works keyless at 60 req/hr; the token raises the limit. |
 | Hacker News | `--search=hackernews` | nothing | Algolia-hosted HN search. Community discussion, release threads, primary sources. Snippet shows points/comments. |
@@ -438,6 +439,8 @@ The fan-out is how the adapter fleet composes: one general-web engine plus one o
 When a round gathers **zero** sources (backend throttled, every fetch blocked), deepdive stops *before* the synthesis LLM call and exits with code `3` and a message naming the cause — it never spends tokens producing a citation-free "unable to answer".
 
 A recovery backend is **on by default** (`wikipedia` — keyless, and never shares the primary's failure mode): when a round's primary searches produce zero candidates, the round's queries re-run once through the fallback, with a notice on stderr so a degraded run is never mistaken for a normal one. Tune it with `--search-fallback=wikipedia,arxiv` (env `DEEPDIVE_SEARCH_FALLBACK`, config key `searchFallback`); disable with `--search-fallback=none`. This default came straight from bench data: with DuckDuckGo rate-limiting the test box, five of six default-config questions died with zero sources while every multi-backend run passed — degrading visibly beats dying.
+
+When `--since` is set the default fallback becomes `news,wikipedia`: a recency-filtered run that falls back to encyclopedia pages mostly loses them to the freshness filter (undated or stale), so the news adapter goes first to keep the recovered sources dated and fresh. An explicit `--search-fallback` always wins.
 
 Two more guarantees for unattended use: inside a `multi:` fan-out, a sub-adapter that fails is reported (`search.degraded` event, shown with `--verbose`) rather than silently thinning the source pool, and one that rate-limits is benched for the rest of the run instead of being re-asked. And `--max-runtime=10m` (env `DEEPDIVE_MAX_RUNTIME`; unit required) puts a wall-clock deadline on the whole run — if any stage wedges, the run aborts cleanly instead of hanging forever.
 
@@ -463,12 +466,12 @@ One command, aggregated health report. Paste the output when filing issues.
 
 ```bash
 $ deepdive doctor
-deepdive doctor — v0.23.0
+deepdive doctor — v0.24.0
 
 # environment
   OK  Node        v22.21.1
   --- Platform    win32 x64
-  --- deepdive    v0.23.0
+  --- deepdive    v0.24.0
 
 # cache
   --- dir         ~/.deepdive/cache

@@ -170,14 +170,27 @@ export function resolveConfig(
   const searchAdapter =
     flags.search ?? env.DEEPDIVE_SEARCH ?? DEFAULTS.searchAdapter;
 
+  // --since signals a recency-sensitive run. Resolved here (not at its use
+  // further down) because the search-fallback default depends on it.
+  const sinceRaw = flags.since ?? env.DEEPDIVE_SINCE;
+
   // v0.22.0 — fallback defaults ON (wikipedia: keyless, reliable, never the
   // primary's failure mode). Live bench data drove this: with DDG
   // rate-limiting the box's IP, 5/6 default-config questions died with zero
   // sources while every multi-backend run passed. A default run should
   // degrade visibly (search.fallback notice) rather than die. "none"/"off"
   // (or blank) disables.
+  //
+  // v0.24.0 — recency-aware default: when --since is set, wikipedia is
+  // structurally the WRONG fallback (encyclopedia pages are undated or stale,
+  // so the freshness filter culls them — the v0.23.0 bench `recent` question
+  // completed with 1/3 sources exactly this way). Prepend the keyless news
+  // adapter so a throttled primary degrades into dated, fresh sources. An
+  // explicit flag/env still wins.
   const searchFallbackRaw =
-    flags.searchFallback ?? env.DEEPDIVE_SEARCH_FALLBACK ?? DEFAULTS.searchFallback;
+    flags.searchFallback ??
+    env.DEEPDIVE_SEARCH_FALLBACK ??
+    (sinceRaw ? "news,wikipedia" : DEFAULTS.searchFallback);
   const searchFallbackNorm = searchFallbackRaw.trim().toLowerCase();
   const searchFallback =
     searchFallbackNorm.length === 0 ||
@@ -297,7 +310,7 @@ export function resolveConfig(
   const streamEnabled = !streamOptOut && !jsonOutput;
   const verbose = flags.verbose ?? env.DEEPDIVE_VERBOSE === "1";
   const tldr = flags.tldr ?? env.DEEPDIVE_TLDR === "1";
-  const sinceRaw = flags.since ?? env.DEEPDIVE_SINCE;
+  // sinceRaw is resolved up by the search-fallback default, which depends on it.
   const sinceMs = sinceRaw ? resolveSince(sinceRaw) : undefined;
   const maxRuntimeRaw = flags.maxRuntime ?? env.DEEPDIVE_MAX_RUNTIME;
   const maxRuntimeMs = maxRuntimeRaw ? parseDuration(maxRuntimeRaw) : undefined;
