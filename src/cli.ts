@@ -129,7 +129,8 @@ Flags:
                                 primary searches produce zero candidates (e.g.
                                 rate-limited). Comma list fans out: e.g.
                                 --search-fallback=wikipedia,arxiv.
-                                Env: DEEPDIVE_SEARCH_FALLBACK. Default: none.
+                                Env: DEEPDIVE_SEARCH_FALLBACK.
+                                Default: wikipedia (keyless). =none disables.
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
   --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
@@ -1052,6 +1053,14 @@ async function runResearch(
         env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
+          // The fallback engaging changes where the answer's sources come
+          // from — surface it even without --verbose so a degraded run is
+          // never mistaken for a normal one.
+          if (!config.verbose && e.type === "search.fallback") {
+            process.stderr.write(
+              `deepdive: primary search produced nothing — retrying the round via ${e.adapter}\n`,
+            );
+          }
           // In --deep streaming mode, prefix each round-after-the-first
           // synth with a separator + header so users can tell where one
           // draft ends and the next begins. Round 0's header is the
