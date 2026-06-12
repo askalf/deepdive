@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-06-12
+
+### Added — news adapter (keyless) + recency-aware fallback
+
+- **`--search=news`** — recent, dated news articles via the Bing News RSS feed, no API key. Bing wraps result links in an `apiclick.aspx` redirect; the adapter unwraps the embedded `url` param so deepdive fetches and cites the **publisher directly** (non-http(s) targets rejected). Each snippet is prefixed with the article's `YYYY-MM-DD` pubDate so the planner and synthesizer can see recency at a glance; 403/429 classify as rate-limit errors, so `multi:` benching and degradation visibility work as for every other adapter. Hand-rolled bounded-regex RSS parsing, zero new dependencies.
+- **Recency-aware fallback default**: when `--since` is set (and no explicit `--search-fallback`/env is given), the default fallback becomes **`news,wikipedia`** instead of `wikipedia`. The v0.23.0 validation bench showed why: with DDG throttled, the `recent` question fell back to encyclopedia pages that the `--since=180d` freshness filter culled as undated/stale, completing with 1/3 sources. A recency-filtered run now degrades into dated, fresh sources. Explicit flag/env always wins; `=none` still disables.
+- Bench: `recent` passes on two independent runs with the change (6/3 sources at 1.00 citation support, then 5/3 at 0.80), and the full board hit **6/6 — the first perfect scoreboard** (trajectory 1/6 → 4/6 → 5/6 → 6/6 since v0.21.0). Disclosure in `bench/results/2026-06-12-v0.24.0-news-fallback.md`: a concurrent planner-prompt edit shared the build during that board, so re-run at this tag for a single-change reading.
+
 ## [0.23.0] - 2026-06-12
 
 ### Added — Wikipedia keyword ladder (the fallback actually lands now)
