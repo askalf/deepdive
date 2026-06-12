@@ -27,6 +27,7 @@ Every LLM call goes to an Anthropic-compat endpoint. Default target is [dario](h
 
 1. Run `npm run build` — the TypeScript has to compile cleanly with `strict: true`.
 2. Run `npm test` — all `node --test` suites must pass. Add a new test for any new pure function.
+3. **Touching `src/plan.ts` or `src/synthesize.ts` prompts?** Run the quality bench before and after: `node bench/run.mjs --out=bench/results/<date>-<label>.md` (needs a live LLM at the configured base-url, e.g. `dario proxy`, plus network; takes minutes and spends real tokens — never wire it into CI). Compare scoreboards; the gates are structural floors, so also read the answers.
 3. Do not add new runtime deps without a written reason in the PR description. Two-thirds of the product's value is that it's small enough to audit.
 4. Do not add telemetry or analytics. Ever.
 5. Do not log credentials anywhere. The LLM `apiKey` and any search-adapter keys must not appear in any event, log line, or error message.

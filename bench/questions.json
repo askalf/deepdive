@@ -1,0 +1,57 @@
+{
+  "$comment": "Golden questions for the quality bench (bench/run.mjs). One entry per cookbook shape. Structural expectations only — the bench checks that runs complete, ground themselves in enough sources, and survive citation verification; it does not judge prose. Keep questions stable across releases so scoreboards are comparable.",
+  "defaults": {
+    "minSources": 4,
+    "minSupportRatio": 0.5,
+    "minAnswerWords": 120,
+    "maxCostUsd": 2.0
+  },
+  "questions": [
+    {
+      "id": "factual-lookup",
+      "shape": "single-pass factual",
+      "question": "what are the current rate limits for the Claude API at each usage tier",
+      "expectKeywords": ["tier", "requests", "tokens"]
+    },
+    {
+      "id": "technical-deep",
+      "shape": "how-does-X-work with critic loop",
+      "question": "how does HTTP/3 connection migration work and what breaks it in practice",
+      "args": ["--deep=1"],
+      "expectKeywords": ["QUIC", "connection"],
+      "minSources": 5
+    },
+    {
+      "id": "academic",
+      "shape": "scholarly via domain adapters",
+      "question": "what does recent research say about retrieval-augmented generation reducing hallucinations",
+      "args": ["--search=multi:duckduckgo,arxiv,openalex"],
+      "expectKeywords": ["retrieval", "hallucination"],
+      "minSources": 5
+    },
+    {
+      "id": "comparison",
+      "shape": "trade-off comparison",
+      "question": "SQLite vs PostgreSQL for a single-server web application: when does each win",
+      "expectKeywords": ["SQLite", "PostgreSQL"]
+    },
+    {
+      "id": "recent",
+      "shape": "recency-sensitive",
+      "question": "what notable large language models were released in the last six months",
+      "args": ["--since=180d"],
+      "expectKeywords": ["model"],
+      "minSources": 3,
+      "minAnswerWords": 80
+    },
+    {
+      "id": "niche-ops",
+      "shape": "practitioner Q&A",
+      "question": "why does nginx return 502 with an upstream sent too big header error and how do you fix it",
+      "args": ["--search=multi:duckduckgo,stackexchange"],
+      "expectKeywords": ["proxy_buffer", "502"],
+      "minSources": 3,
+      "minAnswerWords": 80
+    }
+  ]
+}
