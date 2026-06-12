@@ -44,6 +44,41 @@ export const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+// #87 — the fetch-stage wedge. A run once hung 18+ minutes with every
+// per-call timeout "passing": deepdive idle, chrome children idle, no
+// progress. The per-call timeouts can't be airtight because the page work
+// includes protocol calls that accept no timeout at all (page.evaluate —
+// a renderer main thread blocked by a dialog, window.print(), or a
+// never-settling document leaves it pending forever) and calls whose
+// defaults a wedged renderer defeats. So fetch() races the ENTIRE page
+// lifecycle against this hard deadline; on expiry the page is force-closed
+// without awaiting it (a wedged page may never settle close() either) and
+// the agent's existing failed-fetch path turns the wedge into one skipped
+// source instead of a hung run.
+export class FetchWedgeError extends Error {
+  constructor(url: string, ms: number) {
+    super(
+      `fetch wedged: no result after ${ms}ms hard deadline — ${url}. ` +
+        `Page force-closed; run continues without this source (deepdive#87).`,
+    );
+    this.name = "FetchWedgeError";
+  }
+}
+
+// Exported for unit tests. Race `work` against a hard deadline. The timer is
+// unref'd (never holds the process open) and cleared when work settles
+// first. When the deadline wins, `work` keeps running detached — its later
+// settlement is delivered to the already-settled race and cannot become an
+// unhandled rejection.
+export function withHardDeadline<T>(work: Promise<T>, ms: number, url: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new FetchWedgeError(url, ms)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
 const STEALTH_ARGS = [
   "--disable-blink-features=AutomationControlled",
   "--disable-features=IsolateOrigins,site-per-process",
@@ -85,6 +120,11 @@ export class BrowserSession {
       locale: "en-US",
       javaScriptEnabled: true,
     });
+    // #87: bound every protocol call on this context (newPage, content,
+    // title, …) by the fetch timeout instead of Playwright's 30s default.
+    // Calls that accept no timeout (evaluate) are covered by the hard
+    // deadline in fetch().
+    this.context.setDefaultTimeout(this.opts.timeoutMs);
   }
 
   async fetch(url: string): Promise<FetchedPage> {
@@ -98,46 +138,69 @@ export class BrowserSession {
     }
 
     const page: Page = await this.context.newPage();
+    // 2× the per-call timeout + grace: generous enough that the deadline
+    // only fires when the per-call timeouts have ALREADY failed to fire —
+    // i.e. a genuine wedge, not a slow page.
+    const hardMs = this.opts.timeoutMs * 2 + 10_000;
+    let result: FetchedPage | "pdf";
+    let wedged = false;
     try {
-      const response = await page.goto(url, {
-        waitUntil: "domcontentloaded",
-        timeout: this.opts.timeoutMs,
-      });
-      // Give SPAs a moment to finish painting after domcontentloaded.
-      await page
-        .waitForLoadState("networkidle", { timeout: Math.min(5000, this.opts.timeoutMs) })
-        .catch(() => undefined);
-
-      // If the response advertised a PDF content-type even though the
-      // URL didn't end in .pdf, redirect to the bytes path.
-      const headers = response?.headers() ?? {};
-      const ct = headers["content-type"] ?? "";
-      if (looksLikePdf({ contentType: ct })) {
-        await page.close().catch(() => undefined);
-        return await this.fetchPdf(url);
-      }
-
-      const finalUrl = page.url();
-      const status = response?.status() ?? 0;
-      const title = await page.title().catch(() => "");
-      const html = (await page.content()).slice(0, this.opts.maxBytes);
-      const text = (await page.evaluate(() => document.body?.innerText ?? "")).slice(
-        0,
-        this.opts.maxBytes,
-      );
-      return {
-        url,
-        finalUrl,
-        status,
-        title,
-        text,
-        html,
-        fetchedAt: Date.now(),
-        mimeType: extractMimeType(ct),
-      };
+      result = await withHardDeadline(this.extractViaPage(page, url), hardMs, url);
+    } catch (err) {
+      wedged = err instanceof FetchWedgeError;
+      throw err;
     } finally {
-      await page.close().catch(() => undefined);
+      if (wedged) {
+        // The page is unresponsive — close() may never settle. Fire and
+        // forget; context.close() at run end sweeps whatever remains.
+        void page.close().catch(() => undefined);
+      } else {
+        await page.close().catch(() => undefined);
+      }
     }
+    // PDF-by-content-type redirect happens after the page is closed, on the
+    // request-API path with its own timeout.
+    if (result === "pdf") return await this.fetchPdf(url);
+    return result;
+  }
+
+  // The page-scoped portion of fetch(), raced against the #87 hard deadline.
+  private async extractViaPage(page: Page, url: string): Promise<FetchedPage | "pdf"> {
+    const response = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: this.opts.timeoutMs,
+    });
+    // Give SPAs a moment to finish painting after domcontentloaded.
+    await page
+      .waitForLoadState("networkidle", { timeout: Math.min(5000, this.opts.timeoutMs) })
+      .catch(() => undefined);
+
+    // If the response advertised a PDF content-type even though the
+    // URL didn't end in .pdf, redirect to the bytes path.
+    const headers = response?.headers() ?? {};
+    const ct = headers["content-type"] ?? "";
+    if (looksLikePdf({ contentType: ct })) {
+      return "pdf";
+    }
+
+    const finalUrl = page.url();
+    const status = response?.status() ?? 0;
+    const title = await page.title().catch(() => "");
+    const html = (await page.content()).slice(0, this.opts.maxBytes);
+    const text = (await page.evaluate(() => document.body?.innerText ?? "")).slice(
+      0,
+      this.opts.maxBytes,
+    );
+    return {
+      url,
+      finalUrl,
+      status,
+      title,
+      text,
+      html,
+      fetchedAt: Date.now(),
+      mimeType: extractMimeType(ct),
+    };
   }
 
   private async fetchPdf(url: string): Promise<FetchedPage> {
