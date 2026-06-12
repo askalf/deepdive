@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-06-11
+
+### Added — search resilience: rate-limit detection, zero-source abort, recovery fallback
+
+Built from a live dogfood failure: DuckDuckGo silently rate-limits a burst of queries, every search returns 0 results with no warning, and the run still burned a synthesis LLM call to produce "unable to answer".
+
+- **Rate-limit detection** — the DuckDuckGo adapter now recognizes throttling (HTTP 202/403/429, or a 200 bot-challenge page with zero parsed results) and throws a typed `SearchRateLimitError` instead of silently returning nothing. Challenge detection only runs when the parse found zero results, so it can't false-positive on a real results page. New exports: `SearchRateLimitError`, `isRateLimitError`, `looksLikeDdgChallenge`.
+- **Request spacing** — consecutive DDG requests are spaced 1s apart so a normal multi-query round no longer trips the limiter (`DEEPDIVE_DDG_DELAY_MS` to tune; `0` disables).
+- **Per-query error tolerance** — a failed search emits a new `search.error` event and the round continues (previously any adapter throw killed the run after the plan call was already paid for). A rate-limited query skips the round's remaining queries — don't hammer a limiter that just refused. `multi:` classifies its every-sub-adapter-failed error as a rate limit when *all* failures were rate limits.
+- **Zero-source abort** — when nothing survived search + fetch + filters, the agent throws `NoSourcesError` **before** the synthesis call. The CLI renders a what-to-try-next message naming the cause (rate limit vs. fetch-side losses vs. genuinely empty) and exits with new code **3** so wrapping scripts can branch. Saved (`continue`) and `--include` sources still avert the abort. New exports: `NoSourcesError`, `SearchErrorInfo`.
+- **`--search-fallback=<adapters>`** (env `DEEPDIVE_SEARCH_FALLBACK`, config key `searchFallback`) — opt-in recovery: when a round's primary searches produce zero candidates, the round's queries re-run once through the fallback adapter (new `search.fallback` event). A comma list fans out (`wikipedia,arxiv` → `multi:wikipedia,arxiv` via new pure `normalizeAdapterList`). The fallback pass runs *all* the round's queries, including ones the primary's short-circuit skipped.
+
+### Added — `--version`
+
+- **`--version` / `-V`** prints the bare version (script-friendly). Previously the version was only visible via `doctor`.
+
+### Fixed
+
+- Unknown search adapter names / missing adapter keys in the research path now exit 2 with a clean message instead of an unhandled rejection.
+
 ## [0.19.0] - 2026-06-09
 
 ### Added — HTML export: heading anchors + table of contents
