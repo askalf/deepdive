@@ -16,7 +16,7 @@ Every LLM call goes to an Anthropic-compat endpoint. Default target is [dario](h
 
 ## Architecture principles
 
-- **One runtime dependency.** `playwright` is required because we actually need to render JS-heavy pages. Nothing else. No `axios`, `node-fetch`, `readability`, `jsdom`, `chalk`, `yargs`, `zod`. Node built-ins and hand-rolled code.
+- **One required runtime dependency.** `playwright` is required because we actually need to render JS-heavy pages. `pdfjs-dist` ships as an *optional* dependency (v0.21+): default installs read PDFs out of the box (the academic adapters surface them constantly), but deepdive runs fully without it — the extractor is lazily imported and absence degrades to a `pdf-no-extractor` skip event. Nothing else. No `axios`, `node-fetch`, `readability`, `jsdom`, `chalk`, `yargs`, `zod`. Node built-ins and hand-rolled code.
 - **Pure decision functions.** Anything with logic goes in a module that can be tested without a browser or an LLM: `parsePlan`, `parseCritique`, `parseArgs`, `resolveConfig`, `parsePositiveInt`, `parseNonNegativeInt`, `extractContent`, `dedupeByUrl`, `parseDuckDuckGoHTML`, `buildSourceTable`, `renderAnswerMarkdown`, `buildSourcePacket`, `cacheKey`, `runConcurrent`.
 - **I/O at the edges.** `cli.ts`, `browser.ts`, `llm.ts`, and the individual search adapters touch the network or disk. Everything else is synchronous over strings and objects.
 - **Events, not prints.** The agent emits structured events via `onEvent`; the CLI renders them. Do not `console.log` from inside `src/agent.ts` or any library module.

@@ -91,9 +91,17 @@ test("dedupeRunningHeadersFooters: no-op on <3 pages", () => {
 
 // ── isPdfExtractorAvailable ─────────────────────────────────────────────────
 
-test("isPdfExtractorAvailable: returns true when pdfjs-dist is installed", async () => {
-  // pdfjs-dist is a devDependency, so this should be true in CI/local.
-  assert.equal(await isPdfExtractorAvailable(), true);
+// pdfjs-dist is an OPTIONAL dependency: installed on most setups, but npm
+// silently skips it on --omit=optional installs and on Node versions its
+// engines field excludes (e.g. Node 20 vs pdfjs-dist 6's >=22.13). The
+// extraction tests run when it's present; when it's absent we instead assert
+// the degraded path (PdfExtractorMissingError) — so CI's Node-version matrix
+// exercises BOTH worlds.
+const pdfjsAvailable = await isPdfExtractorAvailable();
+
+test("isPdfExtractorAvailable: stable across repeat calls", async () => {
+  assert.equal(typeof pdfjsAvailable, "boolean");
+  assert.equal(await isPdfExtractorAvailable(), pdfjsAvailable);
 });
 
 // ── extractPdfText (end-to-end against a minimal PDF) ───────────────────────
@@ -128,15 +136,31 @@ function makeMinimalPdf(text) {
   return enc.encode(body);
 }
 
-test("extractPdfText: round-trips visible text through pdfjs-dist", async () => {
-  const bytes = makeMinimalPdf("HelloDeepdive worldFromPdf");
-  const result = await extractPdfText(bytes);
-  assert.equal(result.pageCount, 1);
-  assert.equal(result.parsedPages, 1);
-  assert.equal(result.truncated, false);
-  assert.match(result.text, /HelloDeepdive/);
-  assert.match(result.text, /worldFromPdf/);
-});
+test(
+  "extractPdfText: round-trips visible text through pdfjs-dist",
+  { skip: !pdfjsAvailable && "pdfjs-dist not installed (optional dep)" },
+  async () => {
+    const bytes = makeMinimalPdf("HelloDeepdive worldFromPdf");
+    const result = await extractPdfText(bytes);
+    assert.equal(result.pageCount, 1);
+    assert.equal(result.parsedPages, 1);
+    assert.equal(result.truncated, false);
+    assert.match(result.text, /HelloDeepdive/);
+    assert.match(result.text, /worldFromPdf/);
+  },
+);
+
+test(
+  "extractPdfText: throws PdfExtractorMissingError when pdfjs-dist is absent",
+  { skip: pdfjsAvailable && "pdfjs-dist installed — degraded path not reachable" },
+  async () => {
+    const bytes = makeMinimalPdf("x");
+    await assert.rejects(
+      () => extractPdfText(bytes),
+      (err) => err instanceof PdfExtractorMissingError,
+    );
+  },
+);
 
 test("extractPdfText: PdfExtractorMissingError class is exported and named", () => {
   const err = new PdfExtractorMissingError();

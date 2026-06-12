@@ -32,7 +32,8 @@ export interface PdfExtractResult {
 export class PdfExtractorMissingError extends Error {
   constructor() {
     super(
-      "pdfjs-dist not installed — install with `npm install -g pdfjs-dist` to enable PDF source support",
+      "pdfjs-dist not installed (it ships as an optional dependency — was the install run with --omit=optional?) — " +
+        "install with `npm install -g pdfjs-dist` to enable PDF source support",
     );
     this.name = "PdfExtractorMissingError";
   }
@@ -46,11 +47,14 @@ async function loadPdfjs(): Promise<unknown> {
   if (pdfjsCache !== undefined) return pdfjsCache;
   try {
     // The legacy build is the only one that runs cleanly in Node without
-    // configuring a worker. Keep this import path as a string literal so
-    // bundlers / tsc don't try to resolve it at compile time.
-    const mod = await import(
-      /* @vite-ignore */ "pdfjs-dist/legacy/build/pdf.mjs"
-    );
+    // configuring a worker. pdfjs-dist is an OPTIONAL dependency — absent on
+    // --omit=optional installs and on Node versions its engines field
+    // excludes (npm silently skips optional deps that fail the engine
+    // check). tsc must typecheck identically whether or not the package is
+    // installed, so suppress module resolution here; the result is treated
+    // as untyped and shape-validated at the call sites below.
+    // @ts-ignore -- optional dependency, may not resolve at compile time
+    const mod = await import(/* @vite-ignore */ "pdfjs-dist/legacy/build/pdf.mjs");
     pdfjsCache = mod;
     return mod;
   } catch {

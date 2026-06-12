@@ -358,9 +358,17 @@ test("runDoctor: includes a 'pdf' category check", async () => {
   });
   const pdf = report.checks.find((c) => c.id === "pdf.extractor");
   assert.ok(pdf, "pdf.extractor check should be present");
-  // pdfjs-dist is a devDependency of this repo; in CI/local it should resolve.
-  assert.equal(pdf.status, "ok");
-  assert.match(pdf.detail, /pdfjs-dist available/);
+  // pdfjs-dist is an OPTIONAL dependency — present on most installs, but npm
+  // engine-skips it on Node versions below its engines floor (CI's Node 20
+  // job). The check must report ok when present, info (not fail) when absent.
+  const { isPdfExtractorAvailable } = await import("../dist/pdf.js");
+  if (await isPdfExtractorAvailable()) {
+    assert.equal(pdf.status, "ok");
+    assert.match(pdf.detail, /pdfjs-dist available/);
+  } else {
+    assert.equal(pdf.status, "info");
+    assert.match(pdf.detail, /not installed/i);
+  }
 });
 
 test("runDoctor: pricing.table check warns when PRICE_TABLE is stale", async () => {
