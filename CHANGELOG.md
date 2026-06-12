@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-06-11
+
+### Changed — search fallback defaults ON (`wikipedia`)
+
+- **`searchFallback` now defaults to `wikipedia`** — keyless, reliable, and never sharing the primary backend's failure mode. The v0.21.0 baseline bench made the case (scoreboard committed under `bench/results/`): with DuckDuckGo rate-limiting the test box, **5 of 6** default-config questions died with zero sources while the one multi-backend question passed with 12 sources and 0.86 citation support. A default run dying on a single backend's throttle was the largest reliability gap vs hosted competitors, who never return nothing.
+- The fallback only engages when a round's primary searches produced **zero candidates** — healthy runs are byte-identical to before. Disable with `--search-fallback=none` (or `off`, or `DEEPDIVE_SEARCH_FALLBACK=none`).
+- Because the fallback engaging changes where the answer's sources come from, the notice now prints to stderr **even without `--verbose`** — a degraded run can never be mistaken for a normal one.
+- Live-proven under an active DDG rate limit: a question that exited 3 minutes earlier completed via the fallback — 3 sources, 9/9 citations supported, $0.044.
+
 ## [0.21.0] - 2026-06-11
 
 ### Added — PDFs out of the box
