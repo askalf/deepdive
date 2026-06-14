@@ -1,7 +1,7 @@
 {
   "name": "@askalf/deepdive",
   "version": "0.25.1",
-  "description": "A local research agent. One command, cited answer. Routes every LLM call through your own proxy (dario, Anthropic-compat, OpenAI-compat). Headless browser + pluggable search + multi-provider LLM — zero hosted dependencies.",
+  "description": "own your research — local agent, cited answers. Part of Own Your Stack.",
   "type": "module",
   "bin": {
     "deepdive": "./dist/cli.js"
