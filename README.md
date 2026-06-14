@@ -1,7 +1,10 @@
 <p align="center">
   <h1 align="center">deepdive</h1>
-  <p align="center"><strong>Your machine. Your LLM subscription. Your search backend. Your cited report.</strong><br>A local research agent: ask a question, it plans sub-queries, searches the web, reads the pages in a real browser, iterates with a critic loop until the answer stops having gaps, and writes you a cited markdown report. Nothing leaves your laptop except the searches you run and the URLs the planner picked to read. Every LLM call routes through <a href="https://github.com/askalf/dario">dario</a> (or any Anthropic-compat endpoint), so the 30-to-60 calls a deep query burns bill against the Claude Max subscription you're already paying for — not a hosted tool stacking its margin on top of Anthropic's API pricing.</p>
 </p>
+
+> _deepdive — own your research — local agent, cited answers. Part of **[Own Your Stack](https://github.com/askalf)** — own your AI infrastructure instead of renting it by the token._
+
+<p align="center"><strong>Your machine. Your LLM subscription. Your search backend. Your cited report.</strong><br>A local research agent: ask a question, it plans sub-queries, searches the web, reads the pages in a real browser, iterates with a critic loop until the answer stops having gaps, and writes you a cited markdown report. Nothing leaves your laptop except the searches you run and the URLs the planner picked to read. Every LLM call routes through <a href="https://github.com/askalf/dario">dario</a> (or any Anthropic-compat endpoint), so the 30-to-60 calls a deep query burns bill against the Claude Max subscription you're already paying for — not a hosted tool stacking its margin on top of Anthropic's API pricing.</p>
 
 <p align="center"><em>Zero hosted dependencies. MIT. Independent, unofficial, third-party — see <a href="DISCLAIMER.md">DISCLAIMER.md</a>.</em></p>
 
@@ -664,26 +667,15 @@ MIT — see [LICENSE](LICENSE) and [DISCLAIMER.md](DISCLAIMER.md).
 
 ---
 
-## Also by askalf
+## Own Your Stack
 
-| Project | What it does |
-|---------|-------------|
-| [arnie](https://github.com/askalf/arnie) | Portable IT troubleshooting companion. Networking, AD, Windows Update, package managers, log triage, hardware checks. |
-| [browser-bridge](https://github.com/askalf/browser-bridge) | Stealth headless Chromium in a container. CDP on 9222 — Playwright/Puppeteer/MCP-compatible. |
-| [dario](https://github.com/askalf/dario) | Local LLM router. Use your Claude Max/Pro subscription as an API. |
-| [git-providers](https://github.com/askalf/git-providers) | Unified GitHub + GitLab + Bitbucket Cloud REST clients behind one GitProvider interface. Plus a 44-entry api-key-provider taxonomy. |
-| [hands](https://github.com/askalf/hands) | Cross-platform computer-use agent. Mouse, keyboard, screen. |
-| [install-kit](https://github.com/askalf/install-kit) | curl-pipe-bash template for self-hosted Docker apps. |
-| [pgflex](https://github.com/askalf/pgflex) | One Postgres API. Two modes (real PG ↔ PGlite WASM). |
-| [redisflex](https://github.com/askalf/redisflex) | One Redis API. Two modes (ioredis ↔ in-process). |
+Part of **[Own Your Stack](https://github.com/askalf)** — open tools for owning your AI infrastructure instead of renting it by the token. One subscription. Your box. Your terms.
 
+- **[dario](https://github.com/askalf/dario)** — own your routing
+- **[deepdive](https://github.com/askalf/deepdive)** — own your research _(you are here)_
+- **[hands](https://github.com/askalf/hands)** — own your computer-use
+- **[agent](https://github.com/askalf/agent)** — own your fleet
+- **[browser-bridge](https://github.com/askalf/browser-bridge)** — own your browser
 
 ---
-
-## Built by Sprayberry Labs
-
-This is one of the open-source building blocks from **[Sprayberry Labs](https://sprayberrylabs.com)** — an independent studio (Atlanta, GA) that ships bespoke software and **fixed-price code & security audits**, delivered with the AI workforce these tools are part of.
-
-Part of the [askalf](https://askalf.org) ecosystem — a self-hosted AI workforce platform, now in early access.
-
-**Got a codebase that needs an expert read?** → **[Scan a repo — free mini-audit](https://sprayberrylabs.com)**, or see the **$1,500 fixed-price Audit** and build Sprints. · [sprayberrylabs.com](https://sprayberrylabs.com) · hello@sprayberrylabs.com
+Part of **[Own Your Stack](https://github.com/askalf)** — own your AI infrastructure instead of renting it. Built by Thomas Sprayberry.
