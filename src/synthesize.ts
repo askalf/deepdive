@@ -2,10 +2,11 @@
 // sources, asks the LLM to produce a cited markdown answer. Sources are
 // passed as a numbered list so the model can cite them inline as [1], [2].
 //
-// When `onToken` is provided, uses the streaming variant so tokens land in
-// front of the user as the model writes them instead of after a 30+s wait.
+// Synthesis always streams (see the call site). When `onToken` is provided
+// (interactive TTY), tokens land in front of the user as the model writes
+// them; otherwise the stream is accumulated and returned in one shot.
 
-import { callLLM, type LLMConfig, type LLMResult } from "./llm.js";
+import { type LLMConfig } from "./llm.js";
 import { callLLMStream } from "./llm-stream.js";
 import type { Source } from "./citations.js";
 import type { UsageSink } from "./plan.js";
@@ -59,12 +60,15 @@ export async function synthesize(
     `Sources (${sources.length}):\n\n${packet}\n\n` +
     `Write the cited markdown answer now.`;
   const messages = [{ role: "user" as const, content: userMessage }];
-  let result: LLMResult;
-  if (onToken) {
-    result = await callLLMStream(messages, system, config, { onToken }, signal);
-  } else {
-    result = await callLLM(messages, system, config, signal);
-  }
+  // Always stream the synthesis (#104). A large, table-heavy answer can take
+  // 100-150s to generate; the non-streaming client's whole-call timeout
+  // (DEFAULT_LLM_TIMEOUT_MS, 120s) intermittently fired mid-generation and
+  // burned three full retries (~360s) before failing. The streaming client
+  // bounds only the connect by that timeout and the generation by an
+  // idle-token deadline, so a long-but-healthy stream finishes in one pass
+  // while a genuine stall still fails fast. `onToken` is undefined in
+  // non-TTY / --json mode — callLLMStream then just accumulates and returns.
+  const result = await callLLMStream(messages, system, config, { onToken }, signal);
   if (result.usage && onUsage) onUsage(result.usage);
   return result.text;
 }

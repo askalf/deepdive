@@ -31,6 +31,26 @@ function makeLLMServer(responseQueue, usageQueue) {
       calls.push({ system: parsed.system, messages: parsed.messages });
       const text = responseQueue.shift() ?? "(no more canned responses)";
       const usage = usageQueue?.shift() ?? { input_tokens: 10, output_tokens: 10 };
+      if (parsed.stream) {
+        // Synthesis streams (callLLMStream). Emit a minimal Anthropic SSE
+        // sequence: input usage in message_start, the text as one text_delta,
+        // output usage in message_delta.
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        const frame = (obj) => `data: ${JSON.stringify(obj)}\n\n`;
+        res.write(
+          frame({
+            type: "message_start",
+            message: { usage: { input_tokens: usage.input_tokens, output_tokens: 0 } },
+          }),
+        );
+        res.write(
+          frame({ type: "content_block_delta", delta: { type: "text_delta", text } }),
+        );
+        res.write(frame({ type: "message_delta", usage: { output_tokens: usage.output_tokens } }));
+        res.write(frame({ type: "message_stop" }));
+        res.end();
+        return;
+      }
       const payload = {
         id: "msg_test",
         type: "message",

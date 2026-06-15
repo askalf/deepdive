@@ -2,8 +2,9 @@
 //
 // Used by the synthesizer so tokens land on stdout as the model writes them
 // instead of making the user stare at a blank terminal for 30+ seconds on a
-// deep query. Retry applies to the initial connect only — mid-stream
-// failures propagate because we've already emitted bytes to the caller.
+// deep query. Retry wraps the initial connect only; once the stream flows a
+// failure surfaces to the caller. The stream is bounded by an idle-token
+// deadline so a stalled response fails fast instead of hanging.
 
 import { trimTrailingSlashes } from "./url-util.js";
 import { retry } from "./retry.js";
@@ -59,9 +60,10 @@ export async function callLLMStream(
   const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
   const attempts = Math.max(1, config.maxAttempts ?? DEFAULT_LLM_ATTEMPTS);
 
-  // Retry wraps the initial connect only. Once we start emitting tokens
-  // through onToken, a mid-stream failure can't be undone, so we let it
-  // surface to the caller instead of silently retrying.
+  // Retry wraps the initial connect only. Once the stream is flowing we don't
+  // retry: a mid-stream failure on this synthesis is (empirically, #104) a
+  // persistent upstream stall, so re-issuing the request just burns the same
+  // wall-clock again; the idle-token deadline below fails it fast instead.
   const res = await retry(
     async () => {
       const combined = makeTimeoutSignal(timeoutMs, signal);
@@ -102,7 +104,11 @@ export async function callLLMStream(
   let text = "";
   let usage: LLMResult["usage"];
 
-  for await (const raw of parseSSE(res.body, signal)) {
+  // Bound the stream by an idle-token deadline (#104). A healthy long
+  // generation never idles between tokens, so it streams to completion even
+  // past `timeoutMs`; a genuine stall (no token for `timeoutMs`) aborts here
+  // instead of hanging until the global --max-runtime (or forever, if unset).
+  for await (const raw of parseSSE(res.body, signal, timeoutMs)) {
     const event =
       format === "openai" ? openaiSSEToAnthropic(raw) ?? raw : raw;
     const type = event.type;
@@ -135,10 +141,13 @@ interface SSEEvent {
   [key: string]: unknown;
 }
 
-// Exported for unit tests.
+// Exported for unit tests. `idleMs`, when set, bounds the gap between chunks:
+// if no data arrives for that long the underlying stream is cancelled and the
+// generator throws a TimeoutError, so a stalled response can't hang forever.
 export async function* parseSSE(
   stream: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
+  idleMs?: number,
 ): AsyncGenerator<SSEEvent> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -146,7 +155,7 @@ export async function* parseSSE(
   try {
     while (true) {
       if (signal?.aborted) throw new Error("aborted");
-      const { done, value } = await reader.read();
+      const { done, value } = await readChunk(reader, idleMs);
       if (done) {
         // Flush any trailing event without blank-line terminator.
         if (buffer.trim().length > 0) {
@@ -168,6 +177,39 @@ export async function* parseSSE(
     }
   } finally {
     reader.releaseLock();
+  }
+}
+
+// Race a single read against an idle deadline. On timeout, cancel the stream
+// so the pending read settles (a locked reader with a pending read can't
+// releaseLock cleanly) and surface a TimeoutError to the generator.
+async function readChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleMs?: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (!idleMs) return reader.read();
+  const read = reader.read();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const idle = new Promise<never>((_, reject) => {
+    // NOT unref'd: while a stream is in flight this timer represents real
+    // pending work (we want the loop kept alive to await the next token). It
+    // is always cleared on a chunk or fires within idleMs, so it never holds
+    // the process open beyond the read it guards.
+    timer = setTimeout(
+      () => reject(new DOMException(`stream idle for ${idleMs}ms`, "TimeoutError")),
+      idleMs,
+    );
+  });
+  try {
+    return await Promise.race([read, idle]);
+  } catch (err) {
+    // Cancel so the still-pending read settles — a never-closing stream would
+    // otherwise leave a dangling promise — then surface the timeout.
+    await reader.cancel(err).catch(() => undefined);
+    await read.catch(() => undefined);
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
