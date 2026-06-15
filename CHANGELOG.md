@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.25.3] - 2026-06-15
+
+### Fixed — the installed `deepdive` command was a silent no-op
+
+- **`npm i -g @askalf/deepdive` then `deepdive …` ran nothing** (exit 0, no output); only `node dist/cli.js …` worked. npm installs the bin as a symlink, so `process.argv[1]` was the symlink path while `import.meta.url` was the resolved module path — the entry-point guard compared them raw, never matched, and skipped `main()`. The guard now compares `realpathSync(argv[1])` to `realpathSync(import.meta.url)`, so `deepdive`, `npx deepdive`, and `node dist/cli.js` all run while imports (tests) still don't. Pinned by `test/cli-entrypoint.test.mjs` (spawns the CLI through a symlink). Went unnoticed because the bench and tests invoke `node dist/cli.js` directly, never the installed bin.
+
 ## [0.25.2] - 2026-06-15
 
 ### Fixed — synthesis reliability on long / stalling generations
