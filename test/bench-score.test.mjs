@@ -4,7 +4,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { effectiveSpec, scoreResult, renderScoreboard, GATES } from "../bench/run.mjs";
+import {
+  effectiveSpec,
+  scoreResult,
+  renderScoreboard,
+  resolveBackend,
+  questionArgs,
+  GATES,
+} from "../bench/run.mjs";
 
 const DEFAULTS = {
   minSources: 4,
@@ -108,4 +115,42 @@ test("renderScoreboard: markdown table with verdicts and totals", () => {
   assert.match(out, /\*\*FAIL\*\*/);
   assert.match(out, /1\/2 passed/);
   assert.match(out, /64s/);
+});
+
+test("renderScoreboard: records the search backend when set, omits when absent", () => {
+  const spec = effectiveSpec({ expectKeywords: ["QUIC"] }, DEFAULTS);
+  const rows = [{ id: "good", score: scoreResult(goodOutcome(), spec), durationMs: 1000 }];
+  const base = { date: "2026-06-14", model: "m", baseUrl: "u", version: "1.0.0" };
+  assert.match(renderScoreboard(rows, { ...base, searchBackend: "searxng" }), /search: `searxng`/);
+  assert.doesNotMatch(renderScoreboard(rows, base), /search:/);
+});
+
+test("resolveBackend: explicit DEEPDIVE_SEARCH wins, else searxng needs a URL", () => {
+  // explicit override wins even when a searxng URL is also present
+  assert.equal(resolveBackend({ DEEPDIVE_SEARCH: "duckduckgo", DEEPDIVE_SEARXNG_URL: "u" }), "duckduckgo");
+  assert.equal(resolveBackend({ DEEPDIVE_SEARCH: "brave" }), "brave");
+  // no override → searxng when a URL is configured
+  assert.equal(resolveBackend({ DEEPDIVE_SEARXNG_URL: "http://localhost:8081" }), "searxng");
+  // nothing usable → null (main() turns this into a guided error)
+  assert.equal(resolveBackend({}), null);
+});
+
+test("questionArgs: injects --search when absent, swaps duckduckgo, keeps domain adapters", () => {
+  // plain question gets the backend injected + standard flags
+  const plain = questionArgs({ question: "q" }, "searxng");
+  assert.deepEqual(plain, ["q", "--json", "--no-sessions", "--max-runtime=8m", "--search=searxng"]);
+
+  // multi-adapter question: only the duckduckgo leg is swapped, arxiv/openalex stay
+  const multi = questionArgs({ question: "q", args: ["--search=multi:duckduckgo,arxiv,openalex"] }, "searxng");
+  assert.ok(multi.includes("--search=multi:searxng,arxiv,openalex"));
+  assert.equal(multi.filter((a) => a.startsWith("--search=")).length, 1); // not double-injected
+
+  // unrelated args (e.g. --since, --deep) pass through untouched
+  const since = questionArgs({ question: "q", args: ["--since=180d"] }, "searxng");
+  assert.ok(since.includes("--since=180d"));
+  assert.ok(since.includes("--search=searxng"));
+
+  // an explicit override of duckduckgo is a no-op swap (reproduces old behavior)
+  const ddg = questionArgs({ question: "q", args: ["--search=multi:duckduckgo,stackexchange"] }, "duckduckgo");
+  assert.ok(ddg.includes("--search=multi:duckduckgo,stackexchange"));
 });
