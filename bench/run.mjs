@@ -6,10 +6,18 @@
 // a regression check after; planner/synth prompts are the highest-leverage
 // knobs in the project and can't be tuned blind.
 //
-//   node bench/run.mjs                  # all questions
-//   node bench/run.mjs --only=academic  # one question
+//   DEEPDIVE_SEARXNG_URL=http://localhost:8081 node bench/run.mjs   # all questions
+//   DEEPDIVE_SEARXNG_URL=… node bench/run.mjs --only=academic       # one question
 //   node bench/run.mjs --list           # list questions, run nothing
-//   node bench/run.mjs --out=bench/results/2026-06-11.md
+//   DEEPDIVE_SEARXNG_URL=… node bench/run.mjs --out=bench/results/2026-06-11.md
+//
+// SEARCH BACKEND — the bench routes its general-web searches through SearXNG,
+// not the CLI's default DuckDuckGo HTML adapter. DDG rate-limits the test box's
+// IP and silently degrades to the wikipedia fallback, which makes prompt deltas
+// unmeasurable (issue #97: stock factual-lookup scored 1/3 on DDG vs 3/3 on
+// SearXNG, same prompt). The PRODUCT default stays DuckDuckGo — this override is
+// bench-only. An explicit DEEPDIVE_SEARCH wins (set it to "duckduckgo" to
+// reproduce the old behavior); otherwise SearXNG, which needs DEEPDIVE_SEARXNG_URL.
 //
 // Scoring is structural, not semantic: did the run complete, ground itself
 // in enough sources, survive the lexical citation verifier, mention the
@@ -102,7 +110,8 @@ export function renderScoreboard(rows, meta) {
   const lines = [];
   lines.push(`# deepdive bench — ${meta.date}`);
   lines.push("");
-  lines.push(`model: \`${meta.model}\` · base-url: \`${meta.baseUrl}\` · deepdive v${meta.version}`);
+  const backend = meta.searchBackend ? ` · search: \`${meta.searchBackend}\`` : "";
+  lines.push(`model: \`${meta.model}\` · base-url: \`${meta.baseUrl}\`${backend} · deepdive v${meta.version}`);
   lines.push("");
   const header = ["question", ...GATES.map(([, label]) => label), "verdict", "time"];
   lines.push(`| ${header.join(" | ")} |`);
@@ -125,13 +134,35 @@ export function renderScoreboard(rows, meta) {
 
 // ── runner ───────────────────────────────────────────────────────────────────
 
-function runOne(q, extraArgs) {
+// Resolve the bench's general-web search backend. An explicit DEEPDIVE_SEARCH
+// wins (use "duckduckgo" to reproduce the pre-SearXNG behavior); otherwise
+// SearXNG, which the CLI's searxng adapter reaches via DEEPDIVE_SEARXNG_URL.
+// Returns null when neither is available — main() then errors with guidance.
+export function resolveBackend(env) {
+  if (env.DEEPDIVE_SEARCH) return env.DEEPDIVE_SEARCH;
+  if (!env.DEEPDIVE_SEARXNG_URL) return null;
+  return "searxng";
+}
+
+// Build the CLI args for one question, routing its general-web leg through
+// `web`. A question's own --search wins, but its `duckduckgo` token is swapped
+// for `web` so multi-adapter questions (academic, niche-ops) ride the same
+// backend; questions with no --search get --search=<web> injected. Domain
+// adapters (arxiv/openalex/stackexchange) and --since are left untouched.
+export function questionArgs(q, web) {
+  const qArgs = (q.args ?? []).map((a) =>
+    a.startsWith("--search=") ? a.replace(/\bduckduckgo\b/g, web) : a,
+  );
+  if (!qArgs.some((a) => a.startsWith("--search="))) qArgs.push(`--search=${web}`);
+  return [q.question, "--json", "--no-sessions", "--max-runtime=8m", ...qArgs];
+}
+
+function runOne(args) {
   return new Promise((resolveRun) => {
     // --max-runtime: a wedged stage must fail the gate, not hang the bench
     // (observed once in the wild before the deadline existed).
-    const args = [CLI, q.question, "--json", "--no-sessions", "--max-runtime=8m", ...(q.args ?? []), ...extraArgs];
     const started = Date.now();
-    const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [CLI, ...args], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
@@ -169,6 +200,18 @@ async function main() {
     return;
   }
 
+  const web = resolveBackend(process.env);
+  if (!web) {
+    console.error(
+      "bench: no search backend. The bench runs through SearXNG for a stable search\n" +
+        "  layer — DuckDuckGo rate-limits the box IP and silently falls back to wikipedia,\n" +
+        "  which makes prompt deltas unmeasurable (issue #97). Point it at a SearXNG:\n" +
+        "    DEEPDIVE_SEARXNG_URL=http://localhost:8081 node bench/run.mjs\n" +
+        "  Or bench another backend explicitly: DEEPDIVE_SEARCH=duckduckgo node bench/run.mjs",
+    );
+    process.exit(2);
+  }
+
   const version = await new Promise((res) => {
     const c = spawn(process.execPath, [CLI, "--version"], { stdio: ["ignore", "pipe", "ignore"] });
     let out = "";
@@ -180,14 +223,17 @@ async function main() {
     date: new Date().toISOString().slice(0, 10),
     model: process.env.DEEPDIVE_MODEL ?? "claude-sonnet-4-6 (default)",
     baseUrl: process.env.DEEPDIVE_BASE_URL ?? "http://localhost:3456 (default)",
+    searchBackend: web,
     version,
   };
 
   console.error(`bench: ${questions.length} question(s) · deepdive v${version}`);
+  // URL to stderr only — never into committed scoreboards (it's a private endpoint).
+  console.error(`bench: search backend = ${web}${web === "searxng" ? ` @ ${process.env.DEEPDIVE_SEARXNG_URL}` : ""}`);
   const rows = [];
   for (const q of questions) {
     console.error(`bench: running ${q.id} …`);
-    const outcome = await runOne(q, []);
+    const outcome = await runOne(questionArgs(q, web));
     const spec = effectiveSpec(q, file.defaults);
     const score = scoreResult(outcome, spec);
     rows.push({ id: q.id, score, durationMs: outcome.durationMs });
