@@ -9,7 +9,7 @@
 // Prints the cited markdown report to stdout (or JSON with --json). Progress
 // events go to stderr when --verbose is set or DEEPDIVE_VERBOSE=1.
 
-import { writeFileSync } from "node:fs";
+import { realpathSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
@@ -1785,7 +1785,17 @@ const isEntryPoint =
   process.argv[1] !== undefined &&
   (() => {
     try {
-      return process.argv[1] === fileURLToPath(import.meta.url);
+      // Resolve symlinks before comparing: npm installs the bin as a symlink,
+      // so `process.argv[1]` is the symlink path (…/bin/deepdive) while
+      // `import.meta.url` is the real module path (…/dist/cli.js). Comparing
+      // raw paths made the installed `deepdive` command a silent no-op — it
+      // never matched, so main() never ran (#109). realpathSync collapses both
+      // to the canonical file, so `deepdive`, `npx deepdive`, and
+      // `node dist/cli.js` all run main while imports (tests) still don't.
+      return (
+        realpathSync(process.argv[1]) ===
+        realpathSync(fileURLToPath(import.meta.url))
+      );
     } catch {
       return false;
     }
