@@ -98,6 +98,45 @@ test("parseSSE: accepts CRLF line endings", async () => {
   assert.equal(events[0].delta.text, "x");
 });
 
+// A stream that delivers `parts` then hangs (never closes) — models a server
+// that stops sending mid-response.
+function stallingStreamOf(parts) {
+  const encoder = new TextEncoder();
+  const queue = parts.map((p) => encoder.encode(p));
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of queue) controller.enqueue(chunk);
+      // deliberately no controller.close(): the next read() never settles.
+    },
+  });
+}
+
+test("parseSSE: idle timeout aborts a stalled stream (#104)", async () => {
+  // First frame arrives, then the stream stalls — the idle deadline must fire.
+  const stream = stallingStreamOf(['data: {"type":"message_start"}\n\n']);
+  await assert.rejects(
+    (async () => {
+      for await (const _e of parseSSE(stream, undefined, 30)) {
+        /* drain; the stall happens on the read after the first frame */
+      }
+    })(),
+    (err) => err?.name === "TimeoutError",
+  );
+});
+
+test("parseSSE: idleMs set but a prompt stream completes without false timeout", async () => {
+  const frames = [
+    'data: {"type":"message_start"}\n\n',
+    'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}\n\n',
+    'data: {"type":"message_stop"}\n\n',
+  ];
+  const events = [];
+  // Generous idle bound; streamOf closes promptly, so no timeout should fire.
+  for await (const e of parseSSE(streamOf(frames), undefined, 1000)) events.push(e);
+  assert.equal(events.length, 3);
+  assert.equal(events[1].delta.text, "ok");
+});
+
 // ──────── callLLMStream: integration ───────────────────────────────────────
 
 function makeSSEResponder(frames) {
@@ -220,6 +259,38 @@ test("callLLMStream: non-text_delta events are ignored gracefully", async () => 
     );
     assert.deepEqual(tokens, ["a", "b"]);
     assert.equal(result.text, "ab");
+  } finally {
+    await stop(server);
+  }
+});
+
+test("callLLMStream: a mid-stream stall surfaces (no mid-stream retry)", async () => {
+  // The stream opens, sends one token, then stalls. callLLMStream retries the
+  // connect only — so the idle-token deadline must surface a TimeoutError
+  // rather than silently re-issuing the request.
+  let calls = 0;
+  const tokens = [];
+  const server = http.createServer((_req, res) => {
+    calls++;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(
+      'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"tok"}}\n\n',
+    );
+    // hang after the first token → stream stalls.
+  });
+  const baseUrl = await start(server);
+  try {
+    await assert.rejects(
+      callLLMStream(
+        [{ role: "user", content: "hi" }],
+        "sys",
+        { baseUrl, apiKey: "t", model: "test", maxTokens: 10, timeoutMs: 150, maxAttempts: 3 },
+        { onToken: (t) => tokens.push(t) },
+      ),
+      (err) => err?.name === "TimeoutError",
+    );
+    assert.deepEqual(tokens, ["tok"]);
+    assert.equal(calls, 1); // connected once, no mid-stream retry
   } finally {
     await stop(server);
   }
