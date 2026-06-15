@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-06-15
+
+### Fixed — synthesis reliability on long / stalling generations
+
+- **The final synthesis call now streams in every mode, bounded by an idle-token deadline.** Non-interactive runs (`--json`, non-TTY) previously synthesized through the non-streaming client, which waits for the whole response under a single whole-call timeout (`DEFAULT_LLM_TIMEOUT_MS`, 120s) and retries the entire generation on expiry — so a slow or briefly-stalling upstream that intermittently timed out mid-generation re-ran the full synthesis up to three times (~360s) before failing. Synthesis now always uses the streaming client (`callLLMStream` accumulates to a string when there is no token sink), so a long-but-healthy generation finishes in one pass. A new idle-token deadline on the SSE read (`parseSSE`) fails a genuinely stalled stream fast — no token for the timeout — instead of hanging to the global `--max-runtime`, or forever when it is unset, which also closes a latent gap in the interactive streaming path. Connect-only retry is preserved. Pinned by new `parseSSE` / `callLLMStream` tests.
+
 ## [0.25.1] - 2026-06-12
 
 ### Fixed — the fetch-stage wedge (#87)
