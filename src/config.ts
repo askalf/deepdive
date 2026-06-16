@@ -10,6 +10,7 @@ import { detectApiFormat, type ApiFormat } from "./llm-format.js";
 import { defaultSessionsDir, normalizeTags, parseDuration } from "./sessions.js";
 import { parseMaxCost } from "./budget.js";
 import { resolveSince } from "./dates.js";
+import type { SourceAuthorityMode } from "./source-authority.js";
 
 export interface RuntimeConfig {
   llm: LLMConfig;
@@ -49,6 +50,10 @@ export interface RuntimeConfig {
   // v0.17.0 — near-duplicate dedup of fetched sources (default on).
   dedupeNearDupes: boolean;
   nearDupeThreshold: number;
+  // #111 — domain-authority ranking mode at the keep stage. "prefer" (default),
+  // "strict" (drop known content farms, with a min-keep floor), or "off". Set
+  // via --source-authority / DEEPDIVE_SOURCE_AUTHORITY.
+  sourceAuthority: SourceAuthorityMode;
   // v0.17.0 — tags applied to this run's saved session (--tag / DEEPDIVE_TAGS).
   // Also doubles as the filter for `sessions ls --tag` / `stats --tag`.
   tags: string[];
@@ -107,6 +112,7 @@ export interface CLIFlags {
   maxRuntime?: string;
   noDedupe?: boolean;
   dedupeThreshold?: number;
+  sourceAuthority?: SourceAuthorityMode;
   tag?: string[];
   // v0.11.0 — already-parsed budget cap in USD. CLI parser converts
   // "--max-cost=$0.50" / "$5" / "0.25" into a number; resolveConfig
@@ -326,6 +332,11 @@ export function resolveConfig(
     parseUnitFloat(env.DEEPDIVE_DEDUPE_THRESHOLD) ??
     0.9;
 
+  const sourceAuthority = resolveSourceAuthority(
+    flags.sourceAuthority,
+    env.DEEPDIVE_SOURCE_AUTHORITY,
+  );
+
   // v0.11.0 — budget cap. Flag takes a pre-parsed number from cli.ts
   // (which uses parseMaxCost on the raw string). Env var is parsed here.
   const maxCostUsd = flags.maxCostUsd ?? parseMaxCost(env.DEEPDIVE_MAX_COST);
@@ -375,12 +386,24 @@ export function resolveConfig(
     tldr,
     dedupeNearDupes,
     nearDupeThreshold,
+    sourceAuthority,
     tags,
     sinceMs,
     sinceRaw,
     maxRuntimeMs,
     maxRuntimeRaw,
   };
+}
+
+// #111 — the flag is already validated in cli.ts; the env var is validated
+// here and falls back to the default rather than crashing a run on a typo.
+function resolveSourceAuthority(
+  flag: SourceAuthorityMode | undefined,
+  envVal: string | undefined,
+): SourceAuthorityMode {
+  if (flag) return flag;
+  const e = envVal?.trim().toLowerCase();
+  return e === "prefer" || e === "strict" || e === "off" ? e : "prefer";
 }
 
 // Exported for unit tests.

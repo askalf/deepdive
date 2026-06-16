@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scoreAuthority } from "../dist/source-authority.js";
+import { scoreAuthority, rankByAuthority } from "../dist/source-authority.js";
 
 const tierOf = (url) => scoreAuthority(url).tier;
 
@@ -62,4 +62,51 @@ test("scoreAuthority: scores are monotonic with tier", () => {
   const unknown = s("https://random-blog.net/x");
   const low = s("https://gpt0x.com/x");
   assert.ok(primary > reputable && reputable > unknown && unknown > low, `${primary} > ${reputable} > ${unknown} > ${low}`);
+});
+
+const id = (u) => u;
+
+test("rankByAuthority prefer: primary > reputable > unknown > low, stable within a tier", () => {
+  const urls = [
+    "https://aiflashreport.com/a", // low
+    "https://example.com/b", // unknown
+    "https://redis.io/docs", // primary (1st in input)
+    "https://en.wikipedia.org/wiki/c", // reputable
+    "https://anu.edu.au/d", // primary (2nd in input)
+  ];
+  assert.deepEqual(rankByAuthority(urls, id, "prefer"), [
+    "https://redis.io/docs", // both primaries first, in input order (stable)
+    "https://anu.edu.au/d",
+    "https://en.wikipedia.org/wiki/c",
+    "https://example.com/b",
+    "https://aiflashreport.com/a",
+  ]);
+});
+
+test("rankByAuthority prefer: never drops a candidate (reorder only)", () => {
+  const urls = ["https://aiflashreport.com/x", "https://gpt0x.com/y", "https://example.com/z"];
+  assert.equal(rankByAuthority(urls, id, "prefer").length, urls.length);
+});
+
+test("rankByAuthority strict: drops low-tier when better sources exist", () => {
+  const urls = [
+    "https://aiflashreport.com/farm", // low — dropped
+    "https://example.com/ok", // unknown — kept
+    "https://redis.io/docs", // primary — kept, first
+  ];
+  assert.deepEqual(rankByAuthority(urls, id, "strict"), [
+    "https://redis.io/docs",
+    "https://example.com/ok",
+  ]);
+});
+
+test("rankByAuthority strict: keeps low-tier when nothing better (min-keep floor)", () => {
+  // A niche/recency round that only surfaces farms must not be zeroed out.
+  const urls = ["https://aiflashreport.com/a", "https://gpt0x.com/b"];
+  assert.equal(rankByAuthority(urls, id, "strict").length, 2);
+});
+
+test("rankByAuthority off: preserves search order exactly", () => {
+  const urls = ["https://aiflashreport.com/a", "https://redis.io/b", "https://example.com/c"];
+  assert.deepEqual(rankByAuthority(urls, id, "off"), urls);
 });

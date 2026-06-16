@@ -102,3 +102,33 @@ export function scoreAuthority(url: string): AuthorityScore {
   if (domainMatches(host, REPUTABLE_DOMAINS)) return tier("reputable", `reputable reference (${host})`);
   return tier("unknown", `unrecognized domain (${host})`);
 }
+
+export type SourceAuthorityMode = "prefer" | "strict" | "off";
+
+/**
+ * Order this round's candidate sources for the limited fetch slots by domain
+ * authority, so authoritative/primary sources win the slots ahead of whatever
+ * search happened to rank first. Pure; consumed by the keep-stage in agent.ts.
+ *
+ *   "prefer" (default): stable-sort by authority descending. Nothing is
+ *      dropped — only the order changes, and search order is preserved within a
+ *      tier (Array.prototype.sort is stable, ES2019+).
+ *   "strict": additionally drop `low`-tier (known content-farm) candidates —
+ *      UNLESS every candidate this round is low, in which case keep them. That
+ *      min-keep floor means a niche or recency topic that only surfaces farms
+ *      still gets sources rather than nothing.
+ *   "off": identity — search order untouched.
+ */
+export function rankByAuthority<T>(
+  items: T[],
+  urlOf: (item: T) => string,
+  mode: SourceAuthorityMode,
+): T[] {
+  if (mode === "off" || items.length <= 1) return items;
+  const scored = items.map((item) => ({ item, score: scoreAuthority(urlOf(item)) }));
+  const pool =
+    mode === "strict" && scored.some((s) => s.score.tier !== "low")
+      ? scored.filter((s) => s.score.tier !== "low")
+      : scored;
+  return [...pool].sort((a, b) => b.score.score - a.score.score).map((s) => s.item);
+}
