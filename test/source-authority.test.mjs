@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scoreAuthority } from "../dist/source-authority.js";
+import { scoreAuthority, summarizeSourceTrust } from "../dist/source-authority.js";
 
 const tierOf = (url) => scoreAuthority(url).tier;
 
@@ -62,4 +62,46 @@ test("scoreAuthority: scores are monotonic with tier", () => {
   const unknown = s("https://random-blog.net/x");
   const low = s("https://gpt0x.com/x");
   assert.ok(primary > reputable && reputable > unknown && unknown > low, `${primary} > ${reputable} > ${unknown} > ${low}`);
+});
+
+test("summarizeSourceTrust: high when no farms and >=half are primary/reputable", () => {
+  const r = summarizeSourceTrust([
+    "https://arxiv.org/a", // primary
+    "https://redis.io/b", // primary
+    "https://en.wikipedia.org/c", // reputable
+    "https://some-blog.dev/d", // unknown
+  ]);
+  assert.equal(r.label, "high");
+  assert.deepEqual(r.counts, { primary: 2, reputable: 1, unknown: 1, low: 0, total: 4 });
+});
+
+test("summarizeSourceTrust: low when >=half are known content farms", () => {
+  const r = summarizeSourceTrust([
+    "https://aiflashreport.com/a", // low
+    "https://gpt0x.com/b", // low
+    "https://lmmarketcap.com/c", // low
+    "https://redis.io/d", // primary
+  ]);
+  assert.equal(r.label, "low");
+  assert.equal(r.counts.low, 3);
+});
+
+test("summarizeSourceTrust: mixed when all sources are unrecognized (no farms, no anchors)", () => {
+  const r = summarizeSourceTrust([
+    "https://blog-one.dev/a",
+    "https://blog-two.net/b",
+    "https://blog-three.io/c",
+  ]);
+  assert.equal(r.label, "mixed");
+  assert.deepEqual(r.counts, { primary: 0, reputable: 0, unknown: 3, low: 0, total: 3 });
+});
+
+test("summarizeSourceTrust: a single farm among trusted sources drops it to mixed, not high", () => {
+  const r = summarizeSourceTrust([
+    "https://arxiv.org/a", // primary
+    "https://redis.io/b", // primary
+    "https://aiflashreport.com/c", // low
+  ]);
+  assert.equal(r.label, "mixed");
+  assert.equal(r.counts.low, 1);
 });
