@@ -10,6 +10,15 @@
 //   DEEPDIVE_SEARXNG_URL=… node bench/run.mjs --only=academic       # one question
 //   node bench/run.mjs --list           # list questions, run nothing
 //   DEEPDIVE_SEARXNG_URL=… node bench/run.mjs --out=bench/results/2026-06-11.md
+//   DEEPDIVE_SEARXNG_URL=… node bench/run.mjs --authority-compare   # off vs prefer
+//
+// SOURCE AUTHORITY (#111 P3) — every scoreboard carries an `authority` column
+// (the kept-source mix the CLI reports in --json: NP/NR/NU/NL · trust) plus an
+// aggregate primary/reputable share. It's REPORTED, never gated — `unknown` is
+// neutral and a niche topic legitimately has no primary sources. `--authority-
+// compare` runs each question twice (--source-authority=off vs =prefer, the
+// default) and prints the before/after shift: does preferring authority move
+// sources from low/unknown toward primary/reputable? (Doubles the run count.)
 //
 // SEARCH BACKEND — the bench routes its general-web searches through SearXNG,
 // not the CLI's default DuckDuckGo HTML adapter. DDG rate-limits the test box's
@@ -113,7 +122,7 @@ export function renderScoreboard(rows, meta) {
   const backend = meta.searchBackend ? ` · search: \`${meta.searchBackend}\`` : "";
   lines.push(`model: \`${meta.model}\` · base-url: \`${meta.baseUrl}\`${backend} · deepdive v${meta.version}`);
   lines.push("");
-  const header = ["question", ...GATES.map(([, label]) => label), "verdict", "time"];
+  const header = ["question", ...GATES.map(([, label]) => label), "authority", "verdict", "time"];
   lines.push(`| ${header.join(" | ")} |`);
   lines.push(`|${header.map(() => "---").join("|")}|`);
   for (const row of rows) {
@@ -122,6 +131,7 @@ export function renderScoreboard(rows, meta) {
       const g = row.score.gates[name];
       cells.push(`${g.pass ? "✅" : "❌"} ${g.detail}`);
     }
+    cells.push(fmtAuthority(row.authority));
     cells.push(row.score.pass ? "**PASS**" : "**FAIL**");
     cells.push(`${(row.durationMs / 1000).toFixed(0)}s`);
     lines.push(`| ${cells.join(" | ")} |`);
@@ -129,6 +139,125 @@ export function renderScoreboard(rows, meta) {
   const passed = rows.filter((r) => r.score.pass).length;
   lines.push("");
   lines.push(`**${passed}/${rows.length} passed.** Structural gates only — read the answers before trusting a comparison.`);
+  const dists = rows.map((r) => r.authority).filter(Boolean);
+  if (dists.length) {
+    const agg = aggregateAuthority(dists);
+    const pct = Math.round(trustedShare(agg) * 100);
+    lines.push("");
+    lines.push(
+      `**Source authority:** ${pct}% primary/reputable ` +
+        `(${agg.primary + agg.reputable}/${agg.total} kept sources · ` +
+        `${agg.primary}P ${agg.reputable}R ${agg.unknown}U ${agg.low}L). ` +
+        `Reported, not gated — \`--authority-compare\` shows the off→prefer delta.`,
+    );
+  }
+  return lines.join("\n") + "\n";
+}
+
+// ── source-authority distribution (P3 of #111) ───────────────────────────────
+// The authority axis is REPORTED, never gated: `unknown` is neutral and a niche
+// topic legitimately surfaces no primary sources, so failing a run on its source
+// mix would punish exactly the long-tail deepdive exists to serve. We read the
+// distribution the CLI already emits in `--json` (the `sourceTrust` summary and
+// per-source `authority` tags from #111/#114), so the bench measures the real
+// shipped signal and keeps its zero-dep promise.
+
+const AUTH_TIERS = ["primary", "reputable", "unknown", "low"];
+
+// Pull the kept-source authority distribution out of a `--json` envelope.
+// Prefers the top-level `sourceTrust` summary; falls back to counting
+// `sources[].authority.tier`; returns an all-zero dist (label null) when the
+// run produced no envelope or predates the source-authority feature.
+export function authorityOf(json) {
+  const empty = { primary: 0, reputable: 0, unknown: 0, low: 0, total: 0, label: null };
+  if (!json) return empty;
+  if (json.sourceTrust?.counts) {
+    const c = json.sourceTrust.counts;
+    return {
+      primary: c.primary ?? 0,
+      reputable: c.reputable ?? 0,
+      unknown: c.unknown ?? 0,
+      low: c.low ?? 0,
+      total: c.total ?? 0,
+      label: json.sourceTrust.label ?? null,
+    };
+  }
+  if (Array.isArray(json.sources)) {
+    const dist = { ...empty };
+    for (const s of json.sources) {
+      const t = s?.authority?.tier;
+      if (AUTH_TIERS.includes(t)) {
+        dist[t]++;
+        dist.total++;
+      }
+    }
+    return dist;
+  }
+  return empty;
+}
+
+// Fraction of sources that are primary or reputable (the "trusted" share),
+// 0..1; 0 when there are no sources.
+export function trustedShare(dist) {
+  return dist.total > 0 ? (dist.primary + dist.reputable) / dist.total : 0;
+}
+
+// Compact board cell: "3P 0R 1U 0L · high", or "—" when there's nothing to show.
+export function fmtAuthority(dist) {
+  if (!dist || dist.total === 0) return "—";
+  const tiers = `${dist.primary}P ${dist.reputable}R ${dist.unknown}U ${dist.low}L`;
+  return dist.label ? `${tiers} · ${dist.label}` : tiers;
+}
+
+// Sum a list of distributions into one aggregate (no label).
+export function aggregateAuthority(dists) {
+  const agg = { primary: 0, reputable: 0, unknown: 0, low: 0, total: 0 };
+  for (const d of dists) {
+    for (const t of AUTH_TIERS) agg[t] += d[t] ?? 0;
+    agg.total += d.total ?? 0;
+  }
+  return agg;
+}
+
+// Before/after scoreboard for `--authority-compare`: each question run under
+// --source-authority=off (raw search order) and =prefer (the default, which
+// lets authoritative sources win the limited fetch slots). Reports the shift in
+// the kept-source mix — the measurable claim behind the source-authority work:
+// does preferring authority actually move sources from low/unknown toward
+// primary/reputable? Informational only; no PASS/FAIL.
+export function renderComparison(pairs, meta) {
+  const lines = [];
+  lines.push(`# deepdive bench — source authority (before/after) — ${meta.date}`);
+  lines.push("");
+  const backend = meta.searchBackend ? ` · search: \`${meta.searchBackend}\`` : "";
+  lines.push(`model: \`${meta.model}\` · base-url: \`${meta.baseUrl}\`${backend} · deepdive v${meta.version}`);
+  lines.push("");
+  lines.push(
+    "`--source-authority`: **off** (raw search order) → **prefer** " +
+      "(default — authoritative sources win the limited fetch slots). " +
+      "Cells: primary/reputable/unknown/low · trust. Informational, not gated.",
+  );
+  lines.push("");
+  const header = ["question", "off", "prefer", "Δ prim+rep"];
+  lines.push(`| ${header.join(" | ")} |`);
+  lines.push(`|${header.map(() => "---").join("|")}|`);
+  for (const p of pairs) {
+    const delta = p.prefer.primary + p.prefer.reputable - (p.off.primary + p.off.reputable);
+    const sign = delta > 0 ? `+${delta}` : `${delta}`;
+    lines.push(`| ${p.id} | ${fmtAuthority(p.off)} | ${fmtAuthority(p.prefer)} | ${sign} |`);
+  }
+  const offAgg = aggregateAuthority(pairs.map((p) => p.off));
+  const prefAgg = aggregateAuthority(pairs.map((p) => p.prefer));
+  const offPct = Math.round(trustedShare(offAgg) * 100);
+  const prefPct = Math.round(trustedShare(prefAgg) * 100);
+  lines.push("");
+  lines.push(
+    `**Aggregate:** primary/reputable share **${offPct}% → ${prefPct}%** ` +
+      `(off: ${offAgg.primary + offAgg.reputable}/${offAgg.total} · ` +
+      `prefer: ${prefAgg.primary + prefAgg.reputable}/${prefAgg.total} kept sources). ` +
+      `Δ counts sources that moved into the limited fetch slots; on a question where ` +
+      `search returns no more candidates than slots, off and prefer match by design.`,
+  );
   return lines.join("\n") + "\n";
 }
 
@@ -149,11 +278,14 @@ export function resolveBackend(env) {
 // for `web` so multi-adapter questions (academic, niche-ops) ride the same
 // backend; questions with no --search get --search=<web> injected. Domain
 // adapters (arxiv/openalex/stackexchange) and --since are left untouched.
-export function questionArgs(q, web) {
+// `authorityMode` (optional) appends --source-authority=<mode> for the
+// before/after compare run; omitted, the run uses the product default.
+export function questionArgs(q, web, authorityMode) {
   const qArgs = (q.args ?? []).map((a) =>
     a.startsWith("--search=") ? a.replace(/\bduckduckgo\b/g, web) : a,
   );
   if (!qArgs.some((a) => a.startsWith("--search="))) qArgs.push(`--search=${web}`);
+  if (authorityMode) qArgs.push(`--source-authority=${authorityMode}`);
   return [q.question, "--json", "--no-sessions", "--max-runtime=8m", ...qArgs];
 }
 
@@ -184,6 +316,7 @@ async function main() {
   const only = argv.find((a) => a.startsWith("--only="))?.slice("--only=".length);
   const outPath = argv.find((a) => a.startsWith("--out="))?.slice("--out=".length);
   const list = argv.includes("--list");
+  const authorityCompare = argv.includes("--authority-compare");
 
   const file = JSON.parse(readFileSync(join(here, "questions.json"), "utf-8"));
   let questions = file.questions;
@@ -230,13 +363,42 @@ async function main() {
   console.error(`bench: ${questions.length} question(s) · deepdive v${version}`);
   // URL to stderr only — never into committed scoreboards (it's a private endpoint).
   console.error(`bench: search backend = ${web}${web === "searxng" ? ` @ ${process.env.DEEPDIVE_SEARXNG_URL}` : ""}`);
+
+  // --authority-compare: run each question twice (--source-authority off vs
+  // prefer) and report the shift in the kept-source mix. A measurement, not a
+  // pass/fail — always exits 0. Doubles the run count, so honor --only.
+  if (authorityCompare) {
+    console.error(`bench: source-authority compare (off → prefer) · ${questions.length} question(s) × 2 runs`);
+    const pairs = [];
+    for (const q of questions) {
+      console.error(`bench: ${q.id} — off …`);
+      const offRun = await runOne(questionArgs(q, web, "off"));
+      console.error(`bench: ${q.id} — prefer …`);
+      const preferRun = await runOne(questionArgs(q, web, "prefer"));
+      const off = authorityOf(offRun.json);
+      const prefer = authorityOf(preferRun.json);
+      pairs.push({ id: q.id, off, prefer });
+      console.error(`bench: ${q.id} → off ${fmtAuthority(off)} | prefer ${fmtAuthority(prefer)}`);
+    }
+    const cmp = renderComparison(pairs, meta);
+    if (outPath) {
+      const p = resolve(outPath);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, cmp, "utf-8");
+      console.error(`bench: wrote ${p}`);
+    } else {
+      console.log(cmp);
+    }
+    process.exit(0);
+  }
+
   const rows = [];
   for (const q of questions) {
     console.error(`bench: running ${q.id} …`);
     const outcome = await runOne(questionArgs(q, web));
     const spec = effectiveSpec(q, file.defaults);
     const score = scoreResult(outcome, spec);
-    rows.push({ id: q.id, score, durationMs: outcome.durationMs });
+    rows.push({ id: q.id, score, durationMs: outcome.durationMs, authority: authorityOf(outcome.json) });
     const verdict = score.pass ? "PASS" : "FAIL";
     console.error(`bench: ${q.id} → ${verdict} (${(outcome.durationMs / 1000).toFixed(0)}s)`);
     if (!score.pass) {
