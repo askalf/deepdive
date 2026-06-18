@@ -103,6 +103,41 @@ export function scoreAuthority(url: string): AuthorityScore {
   return tier("unknown", `unrecognized domain (${host})`);
 }
 
+export interface SourceTrustSummary {
+  /** Aggregate trust read across the kept sources, orthogonal to citation support. */
+  label: "high" | "mixed" | "low";
+  counts: {
+    primary: number;
+    reputable: number;
+    unknown: number;
+    low: number;
+    total: number;
+  };
+}
+
+/**
+ * Summarize domain authority across the kept source URLs into one trust label,
+ * for the output's source-trust signal (#111 P2). Deliberately coarse and
+ * explainable:
+ *   "high"  — no low-trust sources AND at least half are primary/reputable.
+ *   "low"   — at least half the sources are known content farms.
+ *   "mixed" — everything in between (all-unrecognized, or a farm or two).
+ * Distinct from citation support: a fully-cited answer can still be "low" trust
+ * when every source it cites is a content farm.
+ */
+export function summarizeSourceTrust(urls: string[]): SourceTrustSummary {
+  const counts = { primary: 0, reputable: 0, unknown: 0, low: 0, total: urls.length };
+  for (const url of urls) counts[scoreAuthority(url).tier]++;
+  const trusted = counts.primary + counts.reputable;
+  const half = Math.ceil(counts.total / 2);
+  let label: SourceTrustSummary["label"];
+  if (counts.total === 0) label = "mixed";
+  else if (counts.low >= half) label = "low";
+  else if (counts.low === 0 && trusted >= half) label = "high";
+  else label = "mixed";
+  return { label, counts };
+}
+
 export type SourceAuthorityMode = "prefer" | "strict" | "off";
 
 /**

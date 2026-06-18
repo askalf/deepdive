@@ -8,6 +8,9 @@ import {
   renderNoSourcesMessage,
 } from "../dist/cli.js";
 import { NoSourcesError } from "../dist/agent.js";
+import { summarizeSourceTrust } from "../dist/source-authority.js";
+
+const trust = (urls) => summarizeSourceTrust(urls);
 
 test("safeErrorMessage: home dir scrubbed from Error.message", () => {
   const home = homedir();
@@ -144,4 +147,48 @@ test("renderCitationHealthFooter: emits a footer when there are unsupported cite
   assert.match(out, /## Citation health/);
   assert.match(out, /2 of 5/);
   assert.match(out, /threshold 0\.4/);
+});
+
+test("renderCitationHealthFooter: flags low source trust even when citations are clean", () => {
+  const out = renderCitationHealthFooter(
+    undefined,
+    trust(["https://aiflashreport.com/a", "https://gpt0x.com/b"]),
+  );
+  assert.match(out, /## Citation health/);
+  assert.match(out, /Source trust: \*\*low\*\*/);
+  assert.match(out, /content farms/);
+});
+
+test("renderCitationHealthFooter: high source trust adds nothing (clean stays clean)", () => {
+  const out = renderCitationHealthFooter(
+    undefined,
+    trust(["https://arxiv.org/a", "https://redis.io/b"]),
+  );
+  assert.equal(out, "");
+});
+
+test("renderCitationHealthFooter: mixed source trust is surfaced", () => {
+  const out = renderCitationHealthFooter(
+    undefined,
+    trust(["https://blog-one.dev/a", "https://blog-two.net/b"]),
+  );
+  assert.match(out, /Source trust: \*\*mixed\*\*/);
+});
+
+test("renderCitationHealthFooter: shows both axes when cites are weak AND trust is low", () => {
+  const report = {
+    threshold: 0.4,
+    totalCitations: 4,
+    supportedCitations: 1,
+    checks: [],
+    unsupported: [
+      { sentence: "x", citedIds: [1], unsupportedIds: [1], recallByCite: { 1: 0.1 }, supported: false },
+    ],
+  };
+  const out = renderCitationHealthFooter(
+    report,
+    trust(["https://gpt0x.com/a", "https://lmmarketcap.com/b"]),
+  );
+  assert.match(out, /citations have low lexical support/);
+  assert.match(out, /Source trust: \*\*low\*\*/);
 });

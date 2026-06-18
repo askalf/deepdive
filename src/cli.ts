@@ -24,6 +24,11 @@ import { renderSourcesMarkdown, renderAnswerMarkdown } from "./citations.js";
 import { synthesize } from "./synthesize.js";
 import { verifyCitations as runVerify, type VerificationReport } from "./verify.js";
 import {
+  scoreAuthority,
+  summarizeSourceTrust,
+  type SourceTrustSummary,
+} from "./source-authority.js";
+import {
   formatCostLine,
   looksLikeDario,
   estimateCost,
@@ -655,15 +660,32 @@ export function renderMultiModelCostSummary(
 // Exported for unit tests.
 export function renderCitationHealthFooter(
   report: VerificationReport | undefined,
+  trust?: SourceTrustSummary,
 ): string {
-  if (!report || report.unsupported.length === 0) return "";
-  const weak = report.totalCitations - report.supportedCitations;
-  return (
-    `\n## Citation health\n\n` +
-    `⚠ ${weak} of ${report.totalCitations} citations have low lexical support ` +
-    `in their cited source (threshold ${report.threshold}). ` +
-    `Run with \`--verbose\` to see which.\n`
-  );
+  const lines: string[] = [];
+  if (report && report.unsupported.length > 0) {
+    const weak = report.totalCitations - report.supportedCitations;
+    lines.push(
+      `⚠ ${weak} of ${report.totalCitations} citations have low lexical support ` +
+        `in their cited source (threshold ${report.threshold}). ` +
+        `Run with \`--verbose\` to see which.`,
+    );
+  }
+  // Source trust is the orthogonal axis: a clean-citation answer built entirely
+  // on content farms should still be flagged. Only surface it when there's
+  // something to say (mixed/low) so high-trust runs stay clean.
+  if (trust && trust.counts.total > 0 && trust.label !== "high") {
+    const c = trust.counts;
+    const mark = trust.label === "low" ? "⚠ " : "";
+    lines.push(
+      `${mark}Source trust: **${trust.label}** — of ${c.total} source(s), ` +
+        `${c.primary + c.reputable} primary/reputable, ${c.unknown} unrecognized, ` +
+        `${c.low} low-authority${c.low > 0 ? " (content farms)" : ""}. ` +
+        `Distinct from citation support: this rates whether the sources themselves are credible.`,
+    );
+  }
+  if (lines.length === 0) return "";
+  return `\n## Citation health\n\n` + lines.map((l) => l + "\n").join("\n");
 }
 
 // Exported for unit tests. Friendly multi-line rendering of a NoSourcesError —
@@ -1102,7 +1124,10 @@ async function runResearch(
       runSignal,
     );
 
-    const citeFooter = renderCitationHealthFooter(result.verification);
+    const citeFooter = renderCitationHealthFooter(
+      result.verification,
+      summarizeSourceTrust(result.sources.map((s) => s.url)),
+    );
     const strictFail =
       config.strictCitations &&
       (result.verification?.unsupported.length ?? 0) > 0;
@@ -1174,9 +1199,11 @@ async function runResearch(
               title: s.title,
               fetchedAt: s.fetchedAt,
               publishedAt: s.publishedAt,
+              authority: scoreAuthority(s.url),
             })),
             answer: result.answer,
             verification: result.verification,
+            sourceTrust: summarizeSourceTrust(result.sources.map((s) => s.url)),
             cost: result.cost,
             usage: result.usage,
             confidence,
@@ -1499,7 +1526,10 @@ async function exportCommand(parsed: ParsedArgs): Promise<number> {
       format === "html"
         ? renderHtmlReport(record)
         : renderAnswerMarkdown(record.question, record.answer, record.sources) +
-          renderCitationHealthFooter(record.verification);
+          renderCitationHealthFooter(
+            record.verification,
+            summarizeSourceTrust(record.sources.map((s) => s.url)),
+          );
     if (parsed.outPath) {
       const path = resolve(parsed.outPath);
       writeFileSync(path, output, "utf-8");
@@ -1646,7 +1676,10 @@ async function resumeCommand(parsed: ParsedArgs): Promise<number> {
         threshold: config.citeMinRecall,
       });
     }
-    const citeFooter = renderCitationHealthFooter(verification);
+    const citeFooter = renderCitationHealthFooter(
+      verification,
+      summarizeSourceTrust(record.sources.map((s) => s.url)),
+    );
     const strictFail =
       config.strictCitations && (verification?.unsupported.length ?? 0) > 0;
 
