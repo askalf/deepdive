@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-06-18
+
+### Added — source authority: a second, orthogonal trust axis (#111)
+
+deepdive already verifies that each cited claim actually appears in its source (lexical *citation support*). That says nothing about whether the source itself was worth citing — and on recency/trending topics, where AI content farms outrank primary sources, an answer can be fully cited, score perfect citation support, and be built entirely on fabricable spam. A 2026-06-15 dogfood caught exactly this: "the latest open-weight LLMs" pulled sources that were 100% content farms and synthesized a confident answer at 1.00 citation support, indistinguishable in the report from a primary-sourced one. This release adds the missing axis — *source authority* — measured and reported separately so neither signal is mistaken for the other. Like the citation verifier, it has **no LLM in it** (a model asked to rate "credibility" just pattern-matches the credibility-shape farms are built to fake); it's pure, deterministic domain scoring.
+
+- **Domain-authority scoring** (`src/source-authority.ts`, pure / no network). `scoreAuthority(url) → { tier: primary | reputable | unknown | low, score, reason }`. Boost-led, because that's where precision is high: `*.gov`/`*.edu`/`*.mil` + `.ac.*` TLDs, standards/academia (arXiv, IETF, W3C, Nature…), and official docs (a curated vendor set + `docs.`/`developer.` subdomains) score **primary**; Wikipedia/Stack Overflow/GitHub score **reputable**; unrecognized domains stay **unknown / neutral — never punished** (a niche-but-legit source shouldn't lose for being unfamous); a small, conservative, hand-curated denylist of observed content farms scores **low** (precision over recall — a missed farm is acceptable, a misflagged real source is not).
+- **Keep-stage ranking** so authority wins the limited fetch slots. Before the slot-limited fetch selection, candidates are reordered by authority — authoritative sources get read ahead of whatever search ranked first. `--source-authority` / `DEEPDIVE_SOURCE_AUTHORITY`: **`prefer`** (default — reorder only, drops nothing), **`strict`** (also drops `low`-tier farms, with a min-keep floor so an all-farm round still returns sources), **`off`** (identity).
+- **Source-trust signal in the output and `--json`.** The citation-health footer now also reports the authority axis when it's not clean — `Source trust: high | mixed | low` with per-tier counts — so a fully-cited answer built on content farms is flagged instead of silently confident (`citation support: 1.00 · source trust: low` reads as the honest two-axis result). `--json` gains a per-source `authority: { tier, score, reason }` and a top-level `sourceTrust` summary; high-trust runs stay silent so clean output stays clean.
+
 ## [0.25.3] - 2026-06-15
 
 ### Fixed — the installed `deepdive` command was a silent no-op
