@@ -11,6 +11,7 @@
 import { withModel, type LLMConfig } from "./llm.js";
 import type { SearchAdapter, SearchResult, SubAdapterFailure } from "./search.js";
 import { dedupeByUrl, isRateLimitError } from "./search.js";
+import { rankByAuthority, type SourceAuthorityMode } from "./source-authority.js";
 import { planQueries, critique, type Plan, type Critique } from "./plan.js";
 import { BrowserSession, type BrowserOptions, type FetchedPage } from "./browser.js";
 import { extractContent } from "./extract.js";
@@ -129,6 +130,11 @@ export interface AgentConfig {
   // with dedupeNearDupes: false (CLI --no-dedupe).
   dedupeNearDupes?: boolean;
   nearDupeThreshold?: number;
+  // #111 — domain-authority ranking of candidates at the keep stage. "prefer"
+  // (default) ranks high-authority sources into the limited fetch slots first;
+  // "strict" additionally drops known content farms (with a min-keep floor);
+  // "off" keeps search order. Undefined is treated as "prefer".
+  sourceAuthority?: SourceAuthorityMode;
   onEvent?: (event: AgentEvent) => void;
   // Fires for each SSE token emitted by the synthesizer. When set, the agent
   // uses the streaming LLM path for synthesize() calls. CLI callers enable
@@ -499,9 +505,20 @@ export async function runAgent(
       const candidatesFoundThisRound = allCandidates.length - candidatesBefore;
 
       const headroom = Math.max(0, config.maxSources - keptSources.length);
-      const toFetch = allCandidates
-        .slice(candidatesBefore)
-        .slice(0, Math.min(headroom, candidatesFoundThisRound));
+      // #111 — rank this round's candidates by domain authority before the
+      // slot-limited selection, so authoritative/primary sources win the
+      // limited fetch slots ahead of whatever search ranked first. "prefer"
+      // (default) only reorders; "strict" may drop known farms; "off" is a
+      // no-op. candidatesFoundThisRound is left intact for the round trace.
+      const rankedCandidates = rankByAuthority(
+        allCandidates.slice(candidatesBefore),
+        (c) => c.url,
+        config.sourceAuthority ?? "prefer",
+      );
+      const toFetch = rankedCandidates.slice(
+        0,
+        Math.min(headroom, rankedCandidates.length),
+      );
 
       const fetched = await fetchMany(toFetch, config, ensureBrowser, signal);
 

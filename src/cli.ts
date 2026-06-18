@@ -183,6 +183,11 @@ Flags:
                                 the same article). Default: drop them.
   --dedupe-threshold=<0..1>     Similarity above which a source counts as a
                                 duplicate. Default: 0.9. Env: DEEPDIVE_DEDUPE_THRESHOLD.
+  --source-authority=<prefer|strict|off>
+                                Rank authoritative/primary sources into the
+                                limited fetch slots. 'strict' also drops known
+                                content farms (with a min-keep floor). Default:
+                                prefer. Env: DEEPDIVE_SOURCE_AUTHORITY.
   --api-format=<anthropic|openai>
                                 Wire format for the LLM endpoint. Default:
                                 auto-detected from --base-url (api.openai.com,
@@ -472,6 +477,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
           break;
         case "since":
           flags.since = value;
+          break;
+        case "source-authority":
+          if (value !== "prefer" && value !== "strict" && value !== "off") {
+            throw new Error(
+              `--source-authority must be 'prefer', 'strict', or 'off' (got: ${value})`,
+            );
+          }
+          flags.sourceAuthority = value;
           break;
         case "max-runtime":
           flags.maxRuntime = value;
@@ -1075,6 +1088,7 @@ async function runResearch(
         sinceMs: config.sinceMs,
         dedupeNearDupes: config.dedupeNearDupes,
         nearDupeThreshold: config.nearDupeThreshold,
+        sourceAuthority: config.sourceAuthority,
         env: process.env,
         onEvent: (e) => {
           if (config.verbose) process.stderr.write(renderEvent(e) + "\n");
