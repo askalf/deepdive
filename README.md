@@ -185,6 +185,22 @@ What this is not: a semantic judge. Lexical recall flags hallucinated names, num
 
 ---
 
+## Source authority
+
+Citation verification answers *"does the answer match its cited source?"*. Source authority answers the orthogonal question *"is that source itself trustworthy?"* — a confident, fully-cited answer built entirely on content-farm spam scores clean on the former and low here. Shipped in v0.26.0, it's a second source-trust axis, reported separately so neither signal is mistaken for the other.
+
+Scoring is deterministic — no LLM, no extra network call — keyed on a source's domain alone, into four tiers (`primary`, `reputable`, `unknown`, `low`). It leads with high-precision boosts (official docs, primary sources, `.gov`/`.edu`, standards bodies), treats anything unrecognized as `unknown` rather than penalizing a niche-but-legit source, and keeps the low-trust list a small, curated denylist of observed content farms — precision over recall.
+
+`--source-authority=<prefer|strict|off>` (env `DEEPDIVE_SOURCE_AUTHORITY`, default `prefer`) controls how that score is used when ordering candidates into the round's limited fetch slots:
+
+- **`prefer`** (default) — stable-sort candidates by authority descending. Nothing is dropped; only the order changes, and search order is preserved within a tier, so authoritative sources win the slots ahead of whatever search happened to rank first.
+- **`strict`** — additionally drop `low`-tier (known content-farm) candidates, *unless* every candidate this round is low, in which case they're kept. That min-keep floor means a niche or recency topic that only surfaces farms still gets sources rather than nothing.
+- **`off`** — identity. Search order is left untouched.
+
+Independently of the mode, the run reports an aggregate trust read across the kept sources — `high` (no low-trust sources and at least half primary/reputable), `low` (at least half are known farms), or `mixed` (everything in between). `--json` carries it as `sourceTrust` (`{ label, counts: { primary, reputable, unknown, low, total } }`), and each source row carries its own `authority` tier.
+
+---
+
 ## Recency and confidence
 
 Two signals that help you read a report at a glance.
@@ -352,6 +368,7 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | `--strict-cites` | off | Exit non-zero if any citation in the answer fails lexical verification. |
 | `--cite-min-recall=<0..1>` | `0.4` | Citation-support threshold. Lower = more permissive. |
 | `--no-verify-cites` | off | Skip the citation-verification pass entirely. |
+| `--source-authority=<prefer\|strict\|off>` | `prefer` | Rank authoritative/primary sources into the limited fetch slots; `strict` also drops known content farms (with a min-keep floor); `off` leaves search order untouched. Env: `DEEPDIVE_SOURCE_AUTHORITY`. |
 | `--no-cost` | off | Suppress the end-of-run cost summary on stderr. |
 | `--include=<paths>` | — | Comma-separated local files / dirs to ingest as sources (`.pdf`, `.md`, `.txt`, `.html`). |
 | `--pdf-max-pages=<n>` | `50` | Per-PDF page cap. Larger PDFs are truncated. |
@@ -359,7 +376,7 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | `--deny-domain=<list>` | — | Comma-separated hostname suffixes — drop matching URLs. |
 | `--api-format=<anthropic\|openai>` | auto | Wire format for the LLM endpoint. Auto-detected from `--base-url`. |
 | `--no-sessions` | off | Don't persist this run to `~/.deepdive/sessions/`. |
-| `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, cost, usage}` for piping. |
+| `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, sourceTrust, cost, usage}` for piping. |
 | `--out=<path>` | — | Save to file. |
 | `--verbose`, `-v` | — | Stream plan / search / fetch / critique / verify events to stderr. |
 
@@ -681,6 +698,8 @@ Part of **[Own Your Stack](https://github.com/askalf)** — open tools for ownin
 - **[warden](https://github.com/askalf/warden)** — own your agent security
 - **[canon](https://github.com/askalf/canon)** — own your agent skills
 - **[keeper](https://github.com/askalf/keeper)** — own your agent secrets
+- **[cordon](https://github.com/askalf/cordon)** — own your prompts
+- **[picket](https://github.com/askalf/picket)** — own your agent browser
 - **[claude-sync](https://github.com/askalf/claude-sync)** — own your sessions
 - **[amnesia](https://github.com/askalf/amnesia)** — own your search
 - **[askalf platform](https://askalf.org)** — own your operation
