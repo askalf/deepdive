@@ -23,6 +23,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
     "test": "node --test --test-concurrency=4 test/*.test.mjs",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
