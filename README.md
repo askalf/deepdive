@@ -197,6 +197,8 @@ Scoring is deterministic — no LLM, no extra network call — keyed on a source
 - **`strict`** — additionally drop `low`-tier (known content-farm) candidates, *unless* every candidate this round is low, in which case they're kept. That min-keep floor means a niche or recency topic that only surfaces farms still gets sources rather than nothing.
 - **`off`** — identity. Search order is left untouched.
 
+The same setting also biases search itself: when fanning out across several backends (`--search=multi:…`), the merged candidate pool is reordered by authority **before** the result cap, so a primary source a backend ranked low still survives into the pool the keep-stage sees instead of being truncated by a farm that ranked first (`strict` drops the farms outright, with the same min-keep floor). Single-backend searches are unaffected — there the backend's own ranking is all there is, and the keep-stage reorders what it returns.
+
 Independently of the mode, the run reports an aggregate trust read across the kept sources — `high` (no low-trust sources and at least half primary/reputable), `low` (at least half are known farms), or `mixed` (everything in between). `--json` carries it as `sourceTrust` (`{ label, counts: { primary, reputable, unknown, low, total } }`), and each source row carries its own `authority` tier.
 
 ---

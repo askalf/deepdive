@@ -185,9 +185,11 @@ Flags:
                                 duplicate. Default: 0.9. Env: DEEPDIVE_DEDUPE_THRESHOLD.
   --source-authority=<prefer|strict|off>
                                 Rank authoritative/primary sources into the
-                                limited fetch slots. 'strict' also drops known
-                                content farms (with a min-keep floor). Default:
-                                prefer. Env: DEEPDIVE_SOURCE_AUTHORITY.
+                                limited fetch slots, and bias the multi: search
+                                fan-out toward them before its result cap.
+                                'strict' also drops known content farms (with a
+                                min-keep floor). Default: prefer. Env:
+                                DEEPDIVE_SOURCE_AUTHORITY.
   --api-format=<anthropic|openai>
                                 Wire format for the LLM endpoint. Default:
                                 auto-detected from --base-url (api.openai.com,
@@ -867,7 +869,7 @@ async function searchCommand(parsed: ParsedArgs): Promise<number> {
   }
   let adapter;
   try {
-    adapter = await resolveSearchAdapter(config.searchAdapter, process.env);
+    adapter = await resolveSearchAdapter(config.searchAdapter, process.env, config.sourceAuthority);
   } catch (err) {
     process.stderr.write(`deepdive: ${safeErrorMessage(err)}\n`);
     return 1;
@@ -996,11 +998,11 @@ async function runResearch(
   let search: import("./search.js").SearchAdapter;
   let fallbackSearch: import("./search.js").SearchAdapter | undefined;
   try {
-    search = await resolveSearchAdapter(config.searchAdapter, process.env);
+    search = await resolveSearchAdapter(config.searchAdapter, process.env, config.sourceAuthority);
     if (config.searchFallback) {
       const fallbackName = normalizeAdapterList(config.searchFallback);
       if (fallbackName && fallbackName !== config.searchAdapter) {
-        fallbackSearch = await resolveSearchAdapter(fallbackName, process.env);
+        fallbackSearch = await resolveSearchAdapter(fallbackName, process.env, config.sourceAuthority);
       } else if (fallbackName === config.searchAdapter) {
         process.stderr.write(
           `deepdive: warning: --search-fallback matches --search (${fallbackName}); ignoring the fallback\n`,

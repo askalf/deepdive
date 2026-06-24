@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — source authority reaches the search stage (#111 P4)
+
+v0.26.0 added domain-authority ranking at the keep stage — but the keep stage can only reorder candidates search already returned. On a farm-heavy topic a `multi:` fan-out could fill its result cap with content farms a backend ranked first and truncate a primary source that ranked low, so the keep stage never saw it. The `--source-authority` setting now also biases the fan-out merge: the deduped pool from `--search=multi:…` is reordered by authority (the same `rankByAuthority` primitive) **before** the result cap, so low-ranked primary sources survive into the pool. `strict` drops known farms there too, with the same min-keep floor; `off` and single-backend searches are unchanged (plain round-robin / the backend's own ranking). Completes the issue's P4 stretch goal — search-side bias toward primary sources — closing the gap the keep stage alone left open.
+
 ## [0.26.0] - 2026-06-18
 
 ### Added — source authority: a second, orthogonal trust axis (#111)

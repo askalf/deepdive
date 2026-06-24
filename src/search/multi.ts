@@ -8,6 +8,7 @@
 import { dedupeKey } from "../url-util.js";
 import { isRateLimitError, SearchRateLimitError } from "../search.js";
 import type { SearchAdapter, SearchResult, SubAdapterFailure } from "../search.js";
+import { rankByAuthority, type SourceAuthorityMode } from "../source-authority.js";
 
 export class MultiSearch implements SearchAdapter {
   readonly name: string;
@@ -24,7 +25,18 @@ export class MultiSearch implements SearchAdapter {
   // appearing in lastFailures so the degradation stays visible per query.
   private benched = new Set<string>();
 
-  constructor(private readonly adapters: SearchAdapter[]) {
+  constructor(
+    private readonly adapters: SearchAdapter[],
+    // #111 P4 — search-side bias toward primary sources. When set to
+    // "prefer"/"strict", the merged fan-out pool is reordered by domain
+    // authority BEFORE the slot cap, so an authoritative backend's results
+    // aren't truncated by a general-web backend that search ranked first. The
+    // keep-stage (agent.ts) only re-ranks candidates the search already
+    // returned; it can't recover a primary source the search `limit` dropped.
+    // Defaults to "off" so library callers and the unit tests keep the plain
+    // round-robin order; the CLI threads the resolved config value through.
+    private readonly authorityMode: SourceAuthorityMode = "off",
+  ) {
     if (adapters.length < 2) {
       throw new Error("multi search needs at least two sub-adapters (multi:a,b)");
     }
@@ -76,27 +88,48 @@ export class MultiSearch implements SearchAdapter {
       }
       throw new Error(`multi: every sub-adapter failed — ${failures.join(" · ")}`);
     }
-    return interleaveResults(lists, limit);
+    return interleaveResults(lists, limit, this.authorityMode);
   }
 }
 
 // Exported for unit tests. Round-robin interleave across the lists in adapter
 // order (a[0], b[0], c[0], a[1], …), dedupe on the normalized URL (first
-// occurrence wins), re-rank densely from 1, cap at limit.
-export function interleaveResults(lists: SearchResult[][], limit: number): SearchResult[] {
-  const out: SearchResult[] = [];
+// occurrence wins), then cap at `limit` and re-rank densely from 1.
+//
+// With `authorityMode` off (default) the cap is applied while merging, so the
+// plain round-robin order is preserved exactly. With "prefer"/"strict" the
+// full deduped pool is merged first and then reordered by domain authority
+// (rankByAuthority — same primitive the keep-stage uses) BEFORE the cap, so a
+// primary source that search ranked low still wins a slot instead of being
+// truncated by a farm that ranked first. "strict" additionally drops known
+// content farms, with rankByAuthority's min-keep floor (an all-farm round
+// still returns sources).
+export function interleaveResults(
+  lists: SearchResult[][],
+  limit: number,
+  authorityMode: SourceAuthorityMode = "off",
+): SearchResult[] {
+  // When biasing is on, merge the whole deduped pool (cap = Infinity) so the
+  // authority sort decides which entries win the limited slots rather than
+  // raw search order.
+  const cap = authorityMode === "off" ? limit : Infinity;
+  const merged: SearchResult[] = [];
   const seen = new Set<string>();
   const longest = Math.max(0, ...lists.map((l) => l.length));
-  for (let i = 0; i < longest && out.length < limit; i++) {
+  for (let i = 0; i < longest && merged.length < cap; i++) {
     for (const list of lists) {
-      if (out.length >= limit) break;
+      if (merged.length >= cap) break;
       const r = list[i];
       if (!r) continue;
       const key = dedupeKey(r.url);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ ...r, rank: out.length + 1 });
+      merged.push(r);
     }
   }
-  return out;
+  const ordered =
+    authorityMode === "off"
+      ? merged
+      : rankByAuthority(merged, (r) => r.url, authorityMode);
+  return ordered.slice(0, limit).map((r, i) => ({ ...r, rank: i + 1 }));
 }

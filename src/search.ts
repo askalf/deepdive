@@ -2,6 +2,7 @@
 // Adapters live under src/search/*. Default is DuckDuckGo HTML (no API key).
 
 import { dedupeKey } from "./url-util.js";
+import type { SourceAuthorityMode } from "./source-authority.js";
 
 export interface SearchResult {
   url: string;
@@ -65,6 +66,9 @@ export function searchTimeoutSignal(signal?: AbortSignal): AbortSignal {
 export async function resolveSearchAdapter(
   name: string,
   env: Record<string, string | undefined>,
+  // #111 P4 — bias the multi: fan-out merge toward primary sources before the
+  // slot cap. Only the multi wrapper consumes it; leaf adapters ignore it.
+  authorityMode: SourceAuthorityMode = "off",
 ): Promise<SearchAdapter> {
   // Fan-out: `multi:a,b[,c…]` resolves each sub-adapter recursively and
   // interleaves their results. Nesting (`multi:` inside the list) is refused.
@@ -83,8 +87,8 @@ export async function resolveSearchAdapter(
       throw new Error("multi search cannot nest another multi adapter");
     }
     const { MultiSearch } = await import("./search/multi.js");
-    const adapters = await Promise.all(list.map((n) => resolveSearchAdapter(n, env)));
-    return new MultiSearch(adapters);
+    const adapters = await Promise.all(list.map((n) => resolveSearchAdapter(n, env, authorityMode)));
+    return new MultiSearch(adapters, authorityMode);
   }
   switch (name) {
     case "duckduckgo":
