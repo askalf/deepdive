@@ -64,10 +64,15 @@ export async function synthesize(
   // 100-150s to generate; the non-streaming client's whole-call timeout
   // (DEFAULT_LLM_TIMEOUT_MS, 120s) intermittently fired mid-generation and
   // burned three full retries (~360s) before failing. The streaming client
-  // bounds only the connect by that timeout and the generation by an
-  // idle-token deadline, so a long-but-healthy stream finishes in one pass
-  // while a genuine stall still fails fast. `onToken` is undefined in
-  // non-TTY / --json mode — callLLMStream then just accumulates and returns.
+  // bounds the connect by that timeout and the generation by an idle-token
+  // deadline, so a long-but-healthy stream finishes in one pass. An
+  // intermittent upstream stall (the ~20% factual-lookup failures of #104)
+  // is retried transparently in this buffered path — nothing has streamed to
+  // a user, so callLLMStream re-issues the request rather than fast-failing
+  // the whole run; once visible tokens have streamed (interactive TTY) a
+  // stall surfaces instead, since a retry would duplicate terminal output.
+  // `onToken` is undefined in non-TTY / --json mode — callLLMStream then just
+  // accumulates and returns.
   const result = await callLLMStream(messages, system, config, { onToken }, signal);
   if (result.usage && onUsage) onUsage(result.usage);
   return result.text;

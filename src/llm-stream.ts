@@ -2,9 +2,18 @@
 //
 // Used by the synthesizer so tokens land on stdout as the model writes them
 // instead of making the user stare at a blank terminal for 30+ seconds on a
-// deep query. Retry wraps the initial connect only; once the stream flows a
-// failure surfaces to the caller. The stream is bounded by an idle-token
-// deadline so a stalled response fails fast instead of hanging.
+// deep query. The whole connect+stream is wrapped in retry-with-backoff, but
+// gated on an `emittedToUser` flag: an intermittent upstream stall is retried
+// transparently while nothing has been printed (the buffered --json / non-TTY
+// path, and pre-first-token stalls in interactive mode), and surfaces once
+// visible tokens have streamed (re-issuing would duplicate terminal output).
+//
+// Two timers bound a call (#104):
+//   - a clearable CONNECT timer bounds time-to-headers only — it is cleared
+//     the instant the response headers land, so a long-but-healthy generation
+//     that streams past `timeoutMs` is never aborted by it; and
+//   - the IDLE-TOKEN deadline in parseSSE bounds the gap between chunks, so a
+//     genuinely stalled stream (no token for `timeoutMs`) fails fast.
 
 import { trimTrailingSlashes } from "./url-util.js";
 import { retry } from "./retry.js";
@@ -60,28 +69,105 @@ export async function callLLMStream(
   const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
   const attempts = Math.max(1, config.maxAttempts ?? DEFAULT_LLM_ATTEMPTS);
 
-  // Retry wraps the initial connect only. Once the stream is flowing we don't
-  // retry: a mid-stream failure on this synthesis is (empirically, #104) a
-  // persistent upstream stall, so re-issuing the request just burns the same
-  // wall-clock again; the idle-token deadline below fails it fast instead.
-  const res = await retry(
+  // True once any token has been surfaced to the user via `onToken`. Tracked
+  // across attempts: a mid-stream failure after the user has seen output can't
+  // be retried (re-issuing would duplicate already-printed tokens), so it
+  // surfaces. In buffered mode (no `onToken` — the --json / non-TTY
+  // factual-lookup path that #104 measured) this stays false, so an
+  // intermittent upstream stall is retried transparently; the accumulated text
+  // is declared per-attempt below, so a retry starts from an empty buffer
+  // rather than concatenating a previous attempt's partial output.
+  let emittedToUser = false;
+
+  return retry(
     async () => {
-      const combined = makeTimeoutSignal(timeoutMs, signal);
-      const r = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: combined,
-      });
-      if (!r.ok) {
-        const detail = await r.text().catch(() => "");
-        throw new LLMError(
-          r.status,
-          `LLM ${r.status} ${r.statusText}: ${clip(detail, 500)}`,
-          detail,
-        );
+      // Per-attempt connect controller. The connect timer aborts a stalled
+      // connect, but is CLEARED the instant the response headers arrive — past
+      // that point the body stream is governed solely by the idle-token
+      // deadline (in parseSSE) and the user signal, so a healthy generation
+      // longer than `timeoutMs` streams to completion instead of being killed
+      // mid-body by the connect clock (#104).
+      const connect = new AbortController();
+      const onUserAbort = () => connect.abort(signal?.reason);
+      if (signal) {
+        if (signal.aborted) connect.abort(signal.reason);
+        else signal.addEventListener("abort", onUserAbort);
       }
-      return r;
+      const connectTimer = setTimeout(
+        () =>
+          connect.abort(
+            new DOMException(`connect timeout after ${timeoutMs}ms`, "TimeoutError"),
+          ),
+        timeoutMs,
+      );
+
+      try {
+        // Catch-then-rethrow (not finally) so `res` is definitely assigned
+        // for the code that follows — reaching past this block means the
+        // fetch resolved and the connect clock has been stopped.
+        let res: Response;
+        try {
+          res = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            signal: connect.signal,
+          });
+        } catch (err) {
+          clearTimeout(connectTimer);
+          throw err;
+        }
+        clearTimeout(connectTimer);
+
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          throw new LLMError(
+            res.status,
+            `LLM ${res.status} ${res.statusText}: ${clip(detail, 500)}`,
+            detail,
+          );
+        }
+        if (!res.body) {
+          throw new Error("LLM response has no stream body");
+        }
+
+        // Fresh per attempt — a retry must not concatenate a previous
+        // attempt's partial text onto this one's.
+        let text = "";
+        let usage: LLMResult["usage"];
+
+        for await (const raw of parseSSE(res.body, signal, timeoutMs)) {
+          const event =
+            format === "openai" ? openaiSSEToAnthropic(raw) ?? raw : raw;
+          const type = event.type;
+          if (type === "content_block_delta" && event.delta?.type === "text_delta") {
+            const chunk = event.delta.text ?? "";
+            if (chunk) {
+              text += chunk;
+              if (opts.onToken) {
+                // Mark BEFORE the sink call: once a token has reached the
+                // user, the retry gate must treat this stream as un-retriable
+                // even if the sink itself throws.
+                emittedToUser = true;
+                opts.onToken(chunk);
+              }
+            }
+          } else if (type === "message_delta" && event.usage) {
+            // The streaming API reports final output_tokens in message_delta;
+            // the input_tokens arrived in message_start.
+            usage = { ...(usage ?? { input_tokens: 0, output_tokens: 0 }), ...event.usage };
+          } else if (type === "message_start" && event.message?.usage) {
+            usage = {
+              input_tokens: event.message.usage.input_tokens ?? 0,
+              output_tokens: event.message.usage.output_tokens ?? 0,
+            };
+          }
+        }
+
+        return { text, usage };
+      } finally {
+        if (signal) signal.removeEventListener("abort", onUserAbort);
+      }
     },
     {
       attempts,
@@ -90,47 +176,19 @@ export async function callLLMStream(
       jitter: 0.25,
       signal,
       shouldRetry: (err) => {
+        // Once any token reached the user, a retry would duplicate visible
+        // output — surface instead. Buffered mode never sets this, so a
+        // stalled stream there (idle-deadline TimeoutError) is retriable.
+        if (emittedToUser) return false;
         if (err instanceof LLMError) return err.retriable;
+        // Fetch errors, the connect-timeout TimeoutError, and the idle-stall
+        // TimeoutError from parseSSE are all transient (#104) → retry. A
+        // user-initiated abort (signal fired) is not.
         if (isUserAbort(err, signal)) return false;
         return true;
       },
     },
   );
-
-  if (!res.body) {
-    throw new Error("LLM response has no stream body");
-  }
-
-  let text = "";
-  let usage: LLMResult["usage"];
-
-  // Bound the stream by an idle-token deadline (#104). A healthy long
-  // generation never idles between tokens, so it streams to completion even
-  // past `timeoutMs`; a genuine stall (no token for `timeoutMs`) aborts here
-  // instead of hanging until the global --max-runtime (or forever, if unset).
-  for await (const raw of parseSSE(res.body, signal, timeoutMs)) {
-    const event =
-      format === "openai" ? openaiSSEToAnthropic(raw) ?? raw : raw;
-    const type = event.type;
-    if (type === "content_block_delta" && event.delta?.type === "text_delta") {
-      const chunk = event.delta.text ?? "";
-      if (chunk) {
-        text += chunk;
-        opts.onToken?.(chunk);
-      }
-    } else if (type === "message_delta" && event.usage) {
-      // The streaming API reports final output_tokens in message_delta; the
-      // input_tokens arrived in message_start.
-      usage = { ...(usage ?? { input_tokens: 0, output_tokens: 0 }), ...event.usage };
-    } else if (type === "message_start" && event.message?.usage) {
-      usage = {
-        input_tokens: event.message.usage.input_tokens ?? 0,
-        output_tokens: event.message.usage.output_tokens ?? 0,
-      };
-    }
-  }
-
-  return { text, usage };
 }
 
 interface SSEEvent {
@@ -243,15 +301,6 @@ export function* parseBlocks(block: string): Generator<SSEEvent> {
     // Malformed frame — silently ignore. SSE allows heartbeat-style `:` lines
     // and similar that shouldn't crash the stream.
   }
-}
-
-function makeTimeoutSignal(
-  timeoutMs: number,
-  userSignal?: AbortSignal,
-): AbortSignal {
-  const timeout = AbortSignal.timeout(timeoutMs);
-  if (!userSignal) return timeout;
-  return AbortSignal.any([userSignal, timeout]);
 }
 
 function isUserAbort(err: unknown, userSignal?: AbortSignal): boolean {
