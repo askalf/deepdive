@@ -213,3 +213,87 @@ test("MultiSearch: lastFailures resets between calls", async () => {
   await m.search("q2", 10);
   assert.equal(m.lastFailures.length, 0, "healthy call leaves no stale failures");
 });
+
+// ── #111 P4: search-side authority bias in interleaveResults ──────────────────
+// Real domains from src/source-authority.ts: arxiv.org/redis.io = primary,
+// gpt0x.com/aiflashreport.com/lmmarketcap.com/precisionaiacademy.com = low.
+
+test("interleaveResults: default mode is unchanged plain round-robin", () => {
+  // No third arg, and explicit "off", both preserve search order + dense rank.
+  const lists = [[r("https://gpt0x.com/1"), r("https://lmmarketcap.com/3")], [r("https://arxiv.org/abs/1")]];
+  const expected = ["https://gpt0x.com/1", "https://arxiv.org/abs/1", "https://lmmarketcap.com/3"];
+  assert.deepEqual(interleaveResults(lists, 10).map((x) => x.url), expected);
+  assert.deepEqual(interleaveResults(lists, 10, "off").map((x) => x.url), expected);
+});
+
+test("interleaveResults: prefer floats a low-ranked primary above farms before the cap", () => {
+  // A general-web list of farms (ranked first by search) plus one primary that
+  // search ranked LAST; with limit 3 the primary is truncated under plain
+  // round-robin but survives once authority reorders the pool before the cap.
+  const lists = [
+    [
+      r("https://gpt0x.com/1"),
+      r("https://aiflashreport.com/2"),
+      r("https://lmmarketcap.com/3"),
+      r("https://arxiv.org/abs/2401.00001"),
+    ],
+    [r("https://precisionaiacademy.com/1")],
+  ];
+  // off: arxiv falls outside the top 3 (gpt0x, precisionaiacademy, aiflashreport).
+  assert.ok(!interleaveResults(lists, 3, "off").some((x) => x.url === "https://arxiv.org/abs/2401.00001"));
+  // prefer: arxiv (primary, 1.0) is reordered to the front and wins a slot.
+  const preferred = interleaveResults(lists, 3, "prefer");
+  assert.equal(preferred[0].url, "https://arxiv.org/abs/2401.00001");
+  assert.deepEqual(preferred.map((x) => x.rank), [1, 2, 3]);
+});
+
+test("interleaveResults: prefer keeps search order stable within a tier", () => {
+  // Two primaries — relative order must follow search order (stable sort);
+  // the unknown-tier source sinks below both but is not dropped.
+  const lists = [
+    [r("https://example.com/x"), r("https://redis.io/docs/a"), r("https://arxiv.org/abs/9")],
+  ];
+  const out = interleaveResults(lists, 10, "prefer").map((x) => x.url);
+  assert.deepEqual(out, ["https://redis.io/docs/a", "https://arxiv.org/abs/9", "https://example.com/x"]);
+});
+
+test("interleaveResults: strict drops known farms when a better source exists", () => {
+  const lists = [
+    [r("https://gpt0x.com/1"), r("https://aiflashreport.com/2"), r("https://redis.io/docs/x")],
+  ];
+  const out = interleaveResults(lists, 10, "strict").map((x) => x.url);
+  assert.deepEqual(out, ["https://redis.io/docs/x"]);
+});
+
+test("interleaveResults: strict min-keep floor returns farms when nothing else surfaced", () => {
+  // An all-farm round (recency/trending topic) must still return sources rather
+  // than nothing — the floor keeps them, in plain search order.
+  const lists = [[r("https://gpt0x.com/1")], [r("https://aiflashreport.com/2")]];
+  const out = interleaveResults(lists, 5, "strict").map((x) => x.url);
+  assert.deepEqual(out, ["https://gpt0x.com/1", "https://aiflashreport.com/2"]);
+});
+
+test("MultiSearch: threads its authority mode into the merged result order", async () => {
+  const m = new MultiSearch(
+    [
+      fake("web", [r("https://gpt0x.com/1"), r("https://arxiv.org/abs/2")]),
+      fake("docs", [r("https://aiflashreport.com/3")]),
+    ],
+    "prefer",
+  );
+  const out = await m.search("q", 2);
+  // arxiv (primary) is reordered ahead of the farms regardless of search rank.
+  assert.equal(out[0].url, "https://arxiv.org/abs/2");
+});
+
+test("MultiSearch: default (no mode) leaves plain round-robin order", async () => {
+  const m = new MultiSearch([
+    fake("web", [r("https://gpt0x.com/1"), r("https://arxiv.org/abs/2")]),
+    fake("docs", [r("https://aiflashreport.com/3")]),
+  ]);
+  const out = await m.search("q", 10);
+  assert.deepEqual(
+    out.map((x) => x.url),
+    ["https://gpt0x.com/1", "https://aiflashreport.com/3", "https://arxiv.org/abs/2"],
+  );
+});
