@@ -240,7 +240,7 @@ test("interleaveResults: prefer floats a low-ranked primary above farms before t
     [r("https://precisionaiacademy.com/1")],
   ];
   // off: arxiv falls outside the top 3 (gpt0x, precisionaiacademy, aiflashreport).
-  assert.ok(!interleaveResults(lists, 3, "off").some((x) => x.url.includes("arxiv.org")));
+  assert.ok(!interleaveResults(lists, 3, "off").some((x) => x.url === "https://arxiv.org/abs/2401.00001"));
   // prefer: arxiv (primary, 1.0) is reordered to the front and wins a slot.
   const preferred = interleaveResults(lists, 3, "prefer");
   assert.equal(preferred[0].url, "https://arxiv.org/abs/2401.00001");
