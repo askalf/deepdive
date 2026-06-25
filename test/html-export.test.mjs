@@ -2,7 +2,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { renderHtmlReport } from "../dist/html-export.js";
+import { renderHtmlReport, renderTrustBadge } from "../dist/html-export.js";
 
 function makeRecord(overrides = {}) {
   return {
@@ -82,4 +82,92 @@ test("renderHtmlReport: a malicious title/source can't inject markup", () => {
 test("renderHtmlReport: empty source list omits the Sources section", () => {
   const html = renderHtmlReport(makeRecord({ sources: [], answer: "no sources" }));
   assert.ok(!html.includes("<h2>Sources</h2>"));
+});
+
+// ── source-trust badge (#111) — the orthogonal axis on the shareable artifact ──
+// The badge reuses the same summarizeSourceTrust() the CLI footer and --json
+// envelope use, so the HTML report (the artifact a user actually shares) carries
+// the same "are the sources themselves credible?" read every other surface does.
+
+test("renderTrustBadge: low-trust run (content farms) gets a flagged badge", () => {
+  const badge = renderTrustBadge(
+    makeRecord({
+      sources: [
+        { id: 1, url: "https://aiflashreport.com/a", title: "Latest LLMs", fetchedAt: Date.now(), content: "" },
+        { id: 2, url: "https://gpt0x.com/b", title: "Models", fetchedAt: Date.now(), content: "" },
+        { id: 3, url: "https://lmmarketcap.com/c", title: "Ranks", fetchedAt: Date.now(), content: "" },
+      ],
+    }),
+  );
+  assert.match(badge, /class="trust trust-low"/);
+  assert.match(badge, />source trust: low</);
+  assert.match(badge, /3 low-authority/); // counts surfaced in the tooltip
+});
+
+test("renderTrustBadge: high-trust run (primary/reputable) stays clean — no badge", () => {
+  const badge = renderTrustBadge(
+    makeRecord({
+      sources: [
+        { id: 1, url: "https://arxiv.org/abs/1", title: "Paper", fetchedAt: Date.now(), content: "" },
+        { id: 2, url: "https://redis.io/docs", title: "Docs", fetchedAt: Date.now(), content: "" },
+        { id: 3, url: "https://en.wikipedia.org/wiki/X", title: "Wiki", fetchedAt: Date.now(), content: "" },
+      ],
+    }),
+  );
+  assert.equal(badge, "");
+});
+
+test("renderTrustBadge: mixed-trust run gets the muted badge", () => {
+  const badge = renderTrustBadge(
+    makeRecord({
+      sources: [
+        { id: 1, url: "https://blog-one.dev/a", title: "A", fetchedAt: Date.now(), content: "" },
+        { id: 2, url: "https://blog-two.net/b", title: "B", fetchedAt: Date.now(), content: "" },
+      ],
+    }),
+  );
+  assert.match(badge, /class="trust trust-mixed"/);
+  assert.match(badge, />source trust: mixed</);
+});
+
+test("renderTrustBadge: empty source set omits the badge", () => {
+  assert.equal(renderTrustBadge(makeRecord({ sources: [] })), "");
+});
+
+test("renderHtmlReport: low-trust badge lands in the meta line; clean run omits it", () => {
+  const farmHtml = renderHtmlReport(
+    makeRecord({
+      sources: [
+        { id: 1, url: "https://aiflashreport.com/a", title: "Latest LLMs", fetchedAt: Date.now(), content: "" },
+        { id: 2, url: "https://gpt0x.com/b", title: "Models", fetchedAt: Date.now(), content: "" },
+      ],
+    }),
+  );
+  assert.match(farmHtml, /<span class="trust trust-low"[^>]*>source trust: low<\/span>/);
+  // A primary-sourced run (arxiv + redis.io → both primary, zero farms) is
+  // "high" trust and must stay badge-free, mirroring the CLI footer convention.
+  const cleanHtml = renderHtmlReport(
+    makeRecord({
+      sources: [
+        { id: 1, url: "https://arxiv.org/abs/1", title: "Paper", fetchedAt: Date.now(), content: "" },
+        { id: 2, url: "https://redis.io/docs", title: "Docs", fetchedAt: Date.now(), content: "" },
+      ],
+    }),
+  );
+  assert.ok(!cleanHtml.includes('class="trust'), "high-trust report must not render a trust badge");
+});
+
+test("renderTrustBadge: tooltip text is HTML-escaped (no raw injection)", () => {
+  // The label/counts are internally generated, but assert the tooltip is built
+  // through escapeHtml so the surface stays injection-safe as it evolves.
+  const badge = renderTrustBadge(
+    makeRecord({
+      sources: [
+        { id: 1, url: "https://aiflashreport.com/a", title: "x", fetchedAt: Date.now(), content: "" },
+        { id: 2, url: "https://gpt0x.com/b", title: "y", fetchedAt: Date.now(), content: "" },
+      ],
+    }),
+  );
+  assert.ok(!badge.includes("<script"), "badge must contain no markup from its inputs");
+  assert.match(badge, /title="source trust: low —/);
 });

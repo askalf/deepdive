@@ -10,6 +10,7 @@
 
 import type { SessionRecord } from "./sessions.js";
 import { markdownToHtml, escapeHtml, extractHeadings } from "./markdown.js";
+import { summarizeSourceTrust, type SourceTrustSummary } from "./source-authority.js";
 
 const CITATION_ANCHOR_PREFIX = "source-";
 
@@ -94,7 +95,33 @@ function renderMetaLine(record: SessionRecord): string {
   if (typeof cost === "number" && Number.isFinite(cost) && cost > 0) {
     parts.push(`~$${cost.toFixed(cost < 0.01 ? 4 : 2)}`);
   }
+  // #111 — source-trust badge, the orthogonal axis to citation support: are the
+  // sources themselves credible? Surfaced on the shareable artifact for the same
+  // reason it's in the CLI footer and --json — a confident, fully-cited report
+  // built on content farms must not look clean to whoever it's handed to. Only
+  // shown when there's something to say (mixed/low); a "high"-trust run stays
+  // clean, mirroring renderCitationHealthFooter.
+  const trustBadge = renderTrustBadge(record);
+  if (trustBadge) parts.push(trustBadge);
   return `<p class="meta">${parts.join(" &middot; ")}</p>`;
+}
+
+// Builds the source-trust meta badge from the kept sources' domains, or "" when
+// the run is clean ("high") or has no sources. Deterministic and LLM-free —
+// reuses the same summarizeSourceTrust the CLI and --json envelope use, so every
+// surface reports one consistent signal. Exported for unit tests.
+export function renderTrustBadge(record: SessionRecord): string {
+  const trust: SourceTrustSummary = summarizeSourceTrust(
+    record.sources.map((s) => s.url),
+  );
+  if (trust.counts.total === 0 || trust.label === "high") return "";
+  const c = trust.counts;
+  const title = escapeHtml(
+    `source trust: ${trust.label} — ${c.primary + c.reputable} primary/reputable, ` +
+      `${c.unknown} unrecognized, ${c.low} low-authority of ${c.total} ` +
+      `(distinct from citation support: whether the sources themselves are credible)`,
+  );
+  return `<span class="trust trust-${trust.label}" title="${title}">source trust: ${trust.label}</span>`;
 }
 
 function renderSourcesHtml(record: SessionRecord): string {
@@ -147,6 +174,9 @@ p { margin: 0 0 1rem; }
 a { color: #1a56db; text-decoration: none; }
 a:hover { text-decoration: underline; }
 .meta { color: #6b7280; font-size: 0.85rem; margin: 0 0 2rem; }
+.meta .trust { font-weight: 600; padding: 0.05em 0.45em; border-radius: 999px; }
+.meta .trust-low { color: #b42318; background: #fef3f2; }
+.meta .trust-mixed { color: #b54708; background: #fffaeb; }
 .toc { margin: -1rem 0 2rem; padding: 0.75rem 1rem; background: #f3f4f6; border-radius: 8px; font-size: 0.9rem; }
 .toc ul { margin: 0; padding: 0; list-style: none; }
 .toc li { margin: 0.25rem 0; }
@@ -173,6 +203,8 @@ footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid #e5e7eb; 
   body { color: #e5e7eb; background: #18181b; }
   a { color: #7aa7ff; }
   .meta, footer { color: #9ca3af; }
+  .meta .trust-low { color: #ff9b8a; background: #3a1512; }
+  .meta .trust-mixed { color: #ffc16b; background: #3a2a0f; }
   .toc { background: #27272a; }
   blockquote { border-left-color: #3f3f46; color: #a1a1aa; }
   code, pre { background: #27272a; }
