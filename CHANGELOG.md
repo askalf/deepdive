@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed — user-publishable `docs.` hosts no longer score as authoritative (#111)
+
+- **`docs.google.com` was scored `primary` (top authority, 1.0) by the `docs.` documentation-subdomain boost** — but `docs.google.com` is the Google Docs *app*, where anyone can publish a document (`/document/d/.../pub`), not Google's product documentation. So an arbitrary user-published Google Doc ranked as authoritative as `arxiv.org` or a `.gov` source: exactly the fabricable-source-scoring-as-trustworthy failure mode the source-authority axis exists to catch (#111), leaking in through the prefix rule's own blind spot. The `docs.` / `developer.` prefix boost now skips a small, auditable `DOCS_PREFIX_EXCLUSIONS` set; excluded hosts fall through to neutral `unknown` (not punished, just not boosted). Google's real product docs live at `developers.google.com` / `cloud.google.com` and are unaffected (the latter is already a curated primary domain). Pinned by a new case in `test/source-authority.test.mjs`.
+
 ### Added — source authority reaches the search stage (#111 P4)
 
 v0.26.0 added domain-authority ranking at the keep stage — but the keep stage can only reorder candidates search already returned. On a farm-heavy topic a `multi:` fan-out could fill its result cap with content farms a backend ranked first and truncate a primary source that ranked low, so the keep stage never saw it. The `--source-authority` setting now also biases the fan-out merge: the deduped pool from `--search=multi:…` is reordered by authority (the same `rankByAuthority` primitive) **before** the result cap, so low-ranked primary sources survive into the pool. `strict` drops known farms there too, with the same min-keep floor; `off` and single-backend searches are unchanged (plain round-robin / the backend's own ranking). Completes the issue's P4 stretch goal — search-side bias toward primary sources — closing the gap the keep stage alone left open.
