@@ -59,6 +59,18 @@ const LOW_DOMAINS = new Set([
 // Subdomains that are almost always official product documentation.
 const DOCS_PREFIXES = ["docs.", "developer.", "developers.", "doc."];
 
+// Hosts that match a DOCS_PREFIXES entry but are user-generated-content
+// platforms, not official product documentation. Anyone can publish a
+// Google Doc at docs.google.com/document/d/.../pub, so the prefix boost
+// would otherwise score arbitrary user content as `primary` — exactly the
+// fabricable-source-scoring-as-trustworthy failure mode this module exists
+// to catch (#111), leaking in through the prefix rule's own blind spot.
+// Google's real product docs live at developers.google.com / cloud.google.com,
+// not here, so excluding docs.google.com costs no true positive. These fall
+// through to a neutral `unknown` (not punished — just not boosted). Small and
+// auditable, like the other lists; extend as UGC doc hosts are observed.
+const DOCS_PREFIX_EXCLUSIONS = new Set(["docs.google.com"]);
+
 // Government / education / military, including second-level ccTLDs
 // (`service.gov.uk`, `ox.ac.uk`, `anu.edu.au`). Anchored at a dot so it can't
 // match `education.com` or `mygov.com`.
@@ -98,7 +110,8 @@ export function scoreAuthority(url: string): AuthorityScore {
   if (domainMatches(host, LOW_DOMAINS)) return tier("low", `known low-trust domain (${host})`);
   if (GOV_EDU_TLD.test(host)) return tier("primary", `government/education TLD (${host})`);
   if (domainMatches(host, PRIMARY_DOMAINS)) return tier("primary", `primary/official source (${host})`);
-  if (DOCS_PREFIXES.some((p) => host.startsWith(p))) return tier("primary", `documentation subdomain (${host})`);
+  if (DOCS_PREFIXES.some((p) => host.startsWith(p)) && !DOCS_PREFIX_EXCLUSIONS.has(host))
+    return tier("primary", `documentation subdomain (${host})`);
   if (domainMatches(host, REPUTABLE_DOMAINS)) return tier("reputable", `reputable reference (${host})`);
   return tier("unknown", `unrecognized domain (${host})`);
 }

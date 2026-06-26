@@ -25,6 +25,17 @@ test("scoreAuthority: docs./developer. subdomains are treated as official docs",
   assert.equal(tierOf("https://developer.apple.com/documentation/"), "primary");
 });
 
+test("scoreAuthority: user-publishable docs. hosts are excluded from the prefix boost", () => {
+  // docs.google.com is the Google Docs app, not Google's product docs: anyone
+  // can publish a doc there, so the docs. prefix must NOT boost it to primary.
+  // It falls through to neutral 'unknown' (not punished, just not trusted as a
+  // primary source). Google's real docs live at developers.google.com /
+  // cloud.google.com, which keep their boost.
+  assert.equal(tierOf("https://docs.google.com/document/d/abc123/pub"), "unknown");
+  assert.equal(tierOf("https://developers.google.com/maps/documentation"), "primary"); // real docs unaffected
+  assert.equal(tierOf("https://cloud.google.com/docs"), "primary"); // curated primary, unaffected
+});
+
 test("scoreAuthority: well-known references are reputable", () => {
   assert.equal(tierOf("https://en.wikipedia.org/wiki/Foo"), "reputable"); // subdomain
   assert.equal(tierOf("https://stackoverflow.com/questions/1"), "reputable");
