@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed — OpenSSH/OpenBSD project hosts were invisible to source authority (#142)
+
+A live v0.27.0 run asked what changed in the latest stable OpenSSH release. The answer was fully cited — 18/18 citations supported, 16 of them grounded in the official OpenSSH release notes — yet the trust badge read `mixed`, because `openssh.org` scored `unknown (0.4)` while the set's one recognized "primary" was a marginally relevant Windows install guide on `learn.microsoft.com`. Beyond the badge, `prefer`'s keep-stage ranking (#113) would rank the actual release notes below any recognized domain under slot competition. Same coverage class as #130 (canonical project sites with no `docs.` prefix), fixed the same way — three receipted entries in the curated primary list, no heuristics: `openssh.com`, `openssh.org` (the mirror search actually surfaces), `openbsd.org` (the parent project). Re-scoring the live run's five kept sources moves it from 1 primary / 4 unknown to 3 primary / 2 unknown. Pinned by a new case in `test/source-authority.test.mjs`.
+
 ## [0.27.0] - 2026-07-02
 
 ### Added — the ops/infra canon becomes visible to source authority (#130)
