@@ -118,18 +118,12 @@ jobs:
         if: steps.ver.outputs.changed == 'true'
         # Pulls the section for this version from CHANGELOG.md so the
         # GitHub release body shows what was in the bump, not a generic
-        # "see changelog" link. Tiny Node one-liner to avoid shell-
-        # escaping the markdown.
+        # "see changelog" link. A committed, unit-tested script — the
+        # previous inline lazy regex silently extracted the empty string
+        # for every release since the extractor shipped (#135).
         run: |
           set -eo pipefail
-          VERSION="${{ steps.ver.outputs.version }}"
-          node -e "
-            const fs = require('fs');
-            const md = fs.readFileSync('CHANGELOG.md', 'utf-8');
-            const re = new RegExp('^## \\\\[' + '${VERSION}' + '\\\\][^\\\\n]*\\\\n([\\\\s\\\\S]*?)(?=\\\\n## \\\\[|$)', 'm');
-            const m = re.exec(md);
-            process.stdout.write(m ? m[1].trim() : '(no changelog section found for this version)');
-          " > release-notes.md
+          node .github/scripts/extract-release-notes.cjs "${{ steps.ver.outputs.version }}" > release-notes.md
           echo "--- release-notes.md ---"
           cat release-notes.md
 
