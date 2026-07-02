@@ -2,7 +2,7 @@
 // deepdive CLI entry.
 //
 //   deepdive "how does claude's rate limiter work"
-//   deepdive "..." --model=claude-opus-4-7 --search=brave --out=report.md
+//   deepdive "..." --model=claude-opus-4-8 --search=brave --out=report.md
 //   deepdive "..." --deep=2 --concurrency=6 --json
 //   deepdive --help
 //
