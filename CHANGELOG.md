@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-07-02
+
 ### Changed — the per-source word cap now spends its budget on query-relevant spans, not the document head (#145)
 
 The first real PDF ingest on a production runner (v0.27.1) fetched the 129-page NIST SP 800-63B-4, extracted all 18,265 words flawlessly — and then head-first truncation (`words.slice(0, maxWords)`) reduced it to title page, authors, abstract, and table of contents. The synthesizer, correctly refusing to cite what it could not see, answered from front matter and said so. Head-first is the worst heuristic for exactly the documents the source-authority axis works hardest to keep: long formal publications put their least informative words first.
