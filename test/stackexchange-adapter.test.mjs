@@ -54,6 +54,63 @@ test("StackExchangeSearch.search: hits the API with site + q", async () => {
   }
 });
 
+test("StackExchangeSearch.search: verbatim hit makes exactly one call (no ladder)", async () => {
+  const calls = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify({ items: [{ title: "Q", link: "https://so.com/q" }] }), { status: 200 });
+  };
+  try {
+    const out = await new StackExchangeSearch().search("nginx 502 upstream", 5);
+    assert.equal(calls.length, 1);
+    assert.equal(out.length, 1);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("StackExchangeSearch.search: zero-result NL query walks the keyword ladder (#131)", async () => {
+  // The real niche-ops bench question: verbatim returns zero (SE literal
+  // match), the 4-keyword variant hits. Mirrors the #86 wikipedia fix.
+  const calls = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    const q = new URL(String(url)).searchParams.get("q");
+    const items =
+      q === "nginx return 502 upstream" ? [{ title: "fix", link: "https://serverfault.com/q/1" }] : [];
+    return new Response(JSON.stringify({ items }), { status: 200 });
+  };
+  try {
+    const out = await new StackExchangeSearch("serverfault").search(
+      "why does nginx return 502 with an upstream sent too big header error and how do you fix it",
+      5,
+    );
+    assert.equal(calls.length, 2); // verbatim (zero) + first ladder variant (hit)
+    assert.match(calls[1], /q=nginx\+return\+502\+upstream/);
+    assert.equal(out[0].url, "https://serverfault.com/q/1");
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("StackExchangeSearch.search: all-zero returns [] after exhausting the ladder", async () => {
+  const calls = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify({ items: [] }), { status: 200 });
+  };
+  try {
+    const out = await new StackExchangeSearch().search("why does nginx return 502 errors", 5);
+    assert.equal(out.length, 0);
+    assert.ok(calls.length > 1 && calls.length <= 4, `verbatim + ≤3 ladder calls, got ${calls.length}`);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
 test("StackExchangeSearch.search: surfaces API error_message", async () => {
   const orig = globalThis.fetch;
   globalThis.fetch = async () =>
