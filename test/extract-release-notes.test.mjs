@@ -36,7 +36,8 @@ test("extract: returns the full section between this heading and the next", () =
 test("extract: NOT defeated by the blank line under the heading (#135)", () => {
   // The old lazy-regex version captured the empty string here — `$` under the
   // `m` flag matches at every line end, so the lazy quantifier stopped at the
-  // first blank line. Every release body since 0.20.0 shipped empty.
+  // first blank line. Every auto-release body ever produced shipped empty —
+  // 28 releases (v0.4.0→v0.27.0), from the workflow's first commit onward.
   assert.notEqual(extract(SAMPLE, "1.2.0"), "");
 });
 
