@@ -488,12 +488,12 @@ One command, aggregated health report. Paste the output when filing issues.
 
 ```bash
 $ deepdive doctor
-deepdive doctor — v0.26.0
+deepdive doctor — v0.27.0
 
 # environment
   OK  Node        v22.21.1
   --- Platform    win32 x64
-  --- deepdive    v0.26.0
+  --- deepdive    v0.27.0
 
 # cache
   --- dir         ~/.deepdive/cache
