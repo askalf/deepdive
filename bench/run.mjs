@@ -379,6 +379,14 @@ async function main() {
       const prefer = authorityOf(preferRun.json);
       pairs.push({ id: q.id, off, prefer });
       console.error(`bench: ${q.id} → off ${fmtAuthority(off)} | prefer ${fmtAuthority(prefer)}`);
+      // A failed run renders as "—" in the board; without this the log holds
+      // no trace of WHY (a mid-board searxng/LLM degradation looks identical
+      // to a question with no data). Mirror the standard path's stderr tail.
+      for (const [mode, run] of [["off", offRun], ["prefer", preferRun]]) {
+        if (run.exitCode !== 0) {
+          console.error(`bench:   ${mode} run failed (exit ${run.exitCode}) — stderr tail: ${run.stderr.split("\n").filter(Boolean).slice(-3).join(" · ")}`);
+        }
+      }
     }
     const cmp = renderComparison(pairs, meta);
     if (outPath) {
