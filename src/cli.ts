@@ -141,7 +141,9 @@ Flags:
                                 =none disables.
   --results-per-query=<n>       Results per sub-query. Default: 5
   --max-sources=<n>             Total sources to fetch. Default: 12
-  --max-words-per-source=<n>    Per-source content cap before synthesis. Default: 2000
+  --max-words-per-source=<n>    Per-source content cap before synthesis. Over-budget
+                                sources spend the cap on query-relevant spans
+                                (plus a head anchor), not the document head. Default: 2000
   --timeout-ms=<ms>             Per-fetch (browser) timeout. Default: 30000
   --browser-cdp-endpoint=<url>  Attach to a running CDP browser (e.g. http://host:9222)
                                 instead of launching Chromium. Skips the Playwright

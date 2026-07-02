@@ -46,8 +46,10 @@ const WORD_TAIL_CHAR = /[\p{L}\p{N}+#]/u; // C++ / C# keep their suffix
 
 // Trim surrounding punctuation from one whitespace-split token, preserving
 // internal structure (HTTP/3, php-fpm, fastcgi_buffer_size) and trailing
-// +/# (C++, C#).
-function trimPunctuation(token: string): string {
+// +/# (C++, C#). Exported for the relevance-window scorer (#145), which must
+// normalize document tokens the same index-walk way (CodeQL forbids the
+// `X+$`-quantifier trim-regex alternative — js/polynomial-redos).
+export function trimPunctuation(token: string): string {
   let start = 0;
   while (start < token.length && !WORD_CHAR.test(token[start])) start++;
   let end = token.length - 1;

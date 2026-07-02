@@ -15,6 +15,8 @@ import { rankByAuthority, type SourceAuthorityMode } from "./source-authority.js
 import { planQueries, critique, type Plan, type Critique } from "./plan.js";
 import { BrowserSession, type BrowserOptions, type FetchedPage } from "./browser.js";
 import { extractContent } from "./extract.js";
+import { extractKeywords } from "./query-keywords.js";
+import { selectRelevantWindow } from "./relevance-window.js";
 import { buildSourceTable, renderAnswerMarkdown, type Source } from "./citations.js";
 import { synthesize, type SourceWithContent } from "./synthesize.js";
 import {
@@ -488,6 +490,16 @@ export async function runAgent(
       emit(config, { type: "round.start", round, queries: queriesForRound });
       allQueries.push(...queriesForRound);
 
+      // #145 — content tokens of the question plus this round's queries drive
+      // relevance-windowed capping below, so an over-budget source spends its
+      // word budget on the spans that can actually answer, not its front
+      // matter.
+      const relevanceTerms = [
+        ...new Set(
+          [question, ...queriesForRound].flatMap((q) => extractKeywords(q)),
+        ),
+      ];
+
       const candidatesBefore = allCandidates.length;
       await runSearchPass(config.search, queriesForRound);
       // Recovery pass: zero candidates from the primary (throttled, down, or
@@ -557,17 +569,22 @@ export async function runAgent(
             });
             continue;
           }
-          // Apply the same word cap as web sources.
-          const words = content.split(/\s+/).filter(Boolean);
-          if (words.length > config.maxWordsPerSource) {
-            content = words.slice(0, config.maxWordsPerSource).join(" ") + " …";
-          }
+          // Apply the same word cap as web sources — relevance-windowed
+          // (#145): a 129-page standard capped head-first is all title page,
+          // authors, abstract, and ToC, and the synth correctly refuses to
+          // answer from front matter.
+          content = selectRelevantWindow(
+            content,
+            relevanceTerms,
+            config.maxWordsPerSource,
+          ).text;
         } else {
           if (f.words <= 50) continue;
           const extracted = extractContent(
             f.page.text,
             f.page.title || f.candidate.title,
             config.maxWordsPerSource,
+            relevanceTerms,
           );
           if (extracted.text.length === 0) continue;
           content = extracted.text;

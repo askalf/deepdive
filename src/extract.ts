@@ -3,6 +3,8 @@
 // extraction dependencies. For quality-sensitive use cases, swap in
 // @mozilla/readability via a custom extractor.
 
+import { selectRelevantWindow } from "./relevance-window.js";
+
 export interface ExtractedContent {
   title: string;
   text: string;
@@ -14,6 +16,7 @@ export function extractContent(
   rawText: string,
   rawTitle: string,
   maxWords: number,
+  relevanceTerms?: string[],
 ): ExtractedContent {
   const normalized = normalizeWhitespace(rawText);
   const paragraphs = normalized
@@ -26,7 +29,15 @@ export function extractContent(
   const words = joined.split(/\s+/).filter(Boolean);
 
   const truncated = words.length > maxWords;
-  const clamped = truncated ? words.slice(0, maxWords).join(" ") + " …" : joined;
+  let clamped: string;
+  if (!truncated) {
+    clamped = joined;
+  } else if (relevanceTerms && relevanceTerms.length > 0) {
+    // #145 — spend the budget on query-relevant spans, not the document head.
+    clamped = selectRelevantWindow(joined, relevanceTerms, maxWords).text;
+  } else {
+    clamped = words.slice(0, maxWords).join(" ") + " …";
+  }
 
   return {
     title: rawTitle.trim(),
