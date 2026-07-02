@@ -199,7 +199,9 @@ Scoring is deterministic — no LLM, no extra network call — keyed on a source
 
 The same setting also biases search itself: when fanning out across several backends (`--search=multi:…`), the merged candidate pool is reordered by authority **before** the result cap, so a primary source a backend ranked low still survives into the pool the keep-stage sees instead of being truncated by a farm that ranked first (`strict` drops the farms outright, with the same min-keep floor). Single-backend searches are unaffected — there the backend's own ranking is all there is, and the keep-stage reorders what it returns.
 
-Independently of the mode, the run reports an aggregate trust read across the kept sources — `high` (no low-trust sources and at least half primary/reputable), `low` (at least half are known farms), or `mixed` (everything in between). `--json` carries it as `sourceTrust` (`{ label, counts: { primary, reputable, unknown, low, total } }`), and each source row carries its own `authority` tier.
+Independently of the mode, the run reports an aggregate trust read across the kept sources — `high` (no low-trust sources and at least half primary/reputable), `low` (at least half are known farms), or `mixed` (everything in between). `--json` carries it as `sourceTrust` (`{ label, counts: { primary, reputable, unknown, low, total } }`), each source row carries its own `authority` tier, and the HTML export (`deepdive export --format=html`) shows the same trust badge on the report's meta line when there's something to flag.
+
+Measured, not promised: the bench commits its off-vs-prefer boards to [`bench/results/`](bench/results/). At [v0.27.0](bench/results/2026-07-02-v0.27.0-source-authority.md), turning `prefer` on moves the primary/reputable share of kept sources from **23% to 44%** aggregate across the golden questions — the ops question fills its fetch slots at 100% primary/reputable and flips source trust from `mixed` to `high`, and on the recency question the known content farms that raw search order kept are pushed out of the slots entirely. Informational, never gated: `unknown` stays neutral by design, and niche topics legitimately lack primary sources.
 
 ---
 
@@ -445,12 +447,12 @@ One adapter per backend. Default (DuckDuckGo) needs no key.
 | Tavily | `--search=tavily` | `DEEPDIVE_TAVILY_KEY` | Research-tuned. Returns pre-extracted content; deepdive re-fetches anyway for consistency. |
 | Exa | `--search=exa` | `DEEPDIVE_EXA_KEY` | Neural search tuned for long, intent-rich queries — a fit for the kind of sub-queries the planner and critic loop generate. Highlights only; deepdive re-fetches the page for full content. |
 | Auto | `--search=auto` | `DEEPDIVE_BRAVE_KEY` (optional) | DDG primary, Brave fallback on DDG failure or empty results. Degrades to DDG-only when no Brave key is set. |
-| Wikipedia | `--search=wikipedia` | nothing | Encyclopedia-first. Best for definitional / factual sub-queries. Language via `DEEPDIVE_WIKIPEDIA_LANG` (default `en`). |
+| Wikipedia | `--search=wikipedia` | nothing | Encyclopedia-first. Best for definitional / factual sub-queries. Language via `DEEPDIVE_WIKIPEDIA_LANG` (default `en`). Zero-result natural-language queries auto-retry through the same keyword ladder as Stack Exchange. |
 | News | `--search=news` | nothing | Recent, dated news articles via the Bing News RSS feed. Best for recency-sensitive questions; pairs with `--since`. Result links are unwrapped to the publisher URL, and each snippet is prefixed with the article date. |
 | arXiv | `--search=arxiv` | nothing | Research-paper / preprint search via the arXiv API. Kept sources are abstract pages; the PDF path handles linked PDFs. |
 | GitHub | `--search=github` | `DEEPDIVE_GITHUB_TOKEN` (optional) | Repository search — "what project does X". Works keyless at 60 req/hr; the token raises the limit. |
 | Hacker News | `--search=hackernews` | nothing | Algolia-hosted HN search. Community discussion, release threads, primary sources. Snippet shows points/comments. |
-| Stack Exchange | `--search=stackexchange` | nothing | Q&A search (default `stackoverflow`; `DEEPDIVE_STACKEXCHANGE_SITE` for serverfault/superuser/etc). Keyless (throttled). |
+| Stack Exchange | `--search=stackexchange` | nothing | Q&A search (default `stackoverflow`; `DEEPDIVE_STACKEXCHANGE_SITE` for serverfault/superuser/etc). Keyless (throttled). The SE API is literal-match, so a zero-result natural-language query auto-retries through a keyword ladder (4 → 2 → 1 leading content tokens). |
 | PubMed | `--search=pubmed` | nothing | Biomedical literature via NCBI E-utilities. Kept sources are abstract pages; snippet shows authors/journal/date. |
 | Semantic Scholar | `--search=semanticscholar` (`s2`) | `DEEPDIVE_S2_KEY` (recommended) | Academic paper search. Keyless works but is heavily rate-limited (frequent 429s); a free API key makes it reliable. Snippet shows citations/year/authors. |
 | OpenAlex | `--search=openalex` | nothing | ~250M scholarly works, all disciplines. Keyless; set `DEEPDIVE_OPENALEX_MAILTO` to join the faster "polite pool". Sources are landing pages / DOIs. |
@@ -664,7 +666,7 @@ All event types, the round-trace structure, and the browser-factory injection po
 
 | Signal | Status |
 |---|---|
-| **Runtime dependencies** | One — `playwright`. No hosted services, no telemetry. |
+| **Runtime dependencies** | One required — `playwright` — plus `pdfjs-dist` as an *optional* dependency for PDF extraction (installs skip it gracefully; see the PDFs section). No hosted services, no telemetry. |
 | **Credentials** | API keys live in env vars or CLI flags; deepdive never persists them. Cache files store fetched page content only, never auth. |
 | **Network scope** | LLM endpoint (your choice), search backend (your choice), and the actual URLs your planner picked to read. No other outbound traffic. Verify with `lsof -i` during a run. |
 | **Telemetry** | None. Zero analytics, tracking, or data collection. Deliberately, not aspirationally. |
