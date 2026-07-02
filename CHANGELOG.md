@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-07-02
+
+### Added — the ops/infra canon becomes visible to source authority (#130)
+
+The v0.26.1 before/after board (`bench/results/2026-07-02-v0.26.1-source-authority.md`) had one dead row: the `niche-ops` question kept **0 primary sources with authority ranking off AND on** — ranking can only promote what scoring can see, and the scorer was blind to the very sources that answer ops questions. Two auditable coverage holes, both fixed by extending the curated lists (no heuristics, no denylist changes, per the module's boost-led philosophy):
+
+- **Official project-documentation hosts that carry no `docs.` prefix** now score `primary`: `nginx.org` (the canonical source for the bench question's literal fix, `proxy_buffer_size`), `apache.org`, `kernel.org`, `php.net`, `git-scm.com` — the same class as the `redis.io`/`postgresql.org` entries already present.
+- **The Stack Exchange network's flagship sites live on their own domains** — `serverfault.com`, `superuser.com`, `askubuntu.com` are *not* subdomains of `stackexchange.com`, so listing `stackexchange.com` never covered them and the canonical ops Q&A scored `unknown`. They now score `reputable`, the same class as the already-listed `stackoverflow.com`.
+
+### Fixed — StackExchange search returned zero results for natural-language queries (#131)
+
+`/2.3/search/advanced?q=` is literal-match against the question corpus, so the planner's long natural-language queries routinely returned **zero items** — live-verified with the niche-ops bench question: 0 results on both `stackoverflow` and `serverfault`, even though the network is full of answers to that exact error. This is the same failure v0.23.0 fixed for wikipedia (#86), now closed for StackExchange with the same machinery: when the verbatim query finds nothing, the adapter walks the pure `keywordLadder` (4 → 2 → 1 leading content tokens) until a variant hits — at most 3 extra keyless-API calls, only on the would-have-been-empty path. Live before → after on the bench question: **0 → 12 results on both sites** (first hit at `nginx return 502 upstream`). Pinned by three new adapter tests, including the real bench question.
+
 ## [0.26.1] - 2026-06-27
 
 ### Fixed — user-publishable `docs.` hosts no longer score as authoritative (#111)
