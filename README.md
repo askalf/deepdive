@@ -22,7 +22,7 @@ Every hosted research tool — Perplexity, OpenAI Deep Research, Gemini Deep Res
 
 **Your data.** The question, the sub-queries the planner invents, every URL the agent chose to read — all of it goes to the vendor's servers. Often to their analytics pipeline. Sometimes to their ad-targeting pipeline. With deepdive, none of that exists. The planner runs in your Node process. The searches hit whichever backend you point at (DuckDuckGo by default, zero keys required; SearXNG, Brave, Tavily, or Exa if you'd rather). The only outbound connections from your machine are: your chosen LLM endpoint, your chosen search endpoint, and the specific URLs the planner decided to read. No telemetry, no analytics, no data retention. Inspectable: `lsof -i` during a run.
 
-**Your model.** Hosted tools pick for you — Perplexity routes through their own blend, OpenAI uses GPT-5, Gemini uses 2.5 Pro. deepdive runs whatever model your endpoint exposes. Default is `claude-sonnet-4-6` for a good quality/cost balance; switch to `claude-opus-4-7` for reasoning-heavy questions; point `--base-url` at a LiteLLM or vLLM instance and run a local model. Same one-line flag either way.
+**Your model.** Hosted tools pick for you — Perplexity routes through their own blend, OpenAI uses GPT-5, Gemini uses 2.5 Pro. deepdive runs whatever model your endpoint exposes. Default is `claude-sonnet-4-6` for a good quality/cost balance; switch to `claude-opus-4-8` for reasoning-heavy questions; point `--base-url` at a LiteLLM or vLLM instance and run a local model. Same one-line flag either way.
 
 **Your search backend.** Hosted tools use their own search index and won't tell you its exact shape. deepdive swaps between DuckDuckGo HTML (default, no key), self-hosted SearXNG, Brave Search API, Tavily, or Exa with one flag. Adding a new adapter is ~30 lines of TypeScript.
 
@@ -36,7 +36,7 @@ Here's the math for one deep query — a question that needs the critic loop to 
 
 | How you run it | Per-query cost | Per-month cost at 10 queries | Data stays local? |
 |---|---|---|---|
-| Per-token API (`claude-opus-4-7`) | **~$2–$8** | **~$20–$80** | Your infra, your call |
+| Per-token API (`claude-opus-4-8`) | **~$2–$8** | **~$20–$80** | Your infra, your call |
 | Per-token API (`claude-sonnet-4-6`) | **~$0.30–$1.20** | **~$3–$12** | Your infra, your call |
 | Perplexity Pro | Capped depth, fixed tier | **$20/mo** | ❌ Perplexity + upstream |
 | OpenAI Deep Research (ChatGPT Plus) | Capped usage, fixed tier | **$20/mo** | ❌ OpenAI + upstream |
@@ -365,7 +365,7 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 |---|---|---|
 | `--deep[=<n>]` | off (bare = 2) | Turn on the critic loop. This is the headline feature. |
 | `--tldr` | off | Lead the answer with a one-paragraph TL;DR before the full detail. |
-| `--model=<name>` | `claude-sonnet-4-6` | Try `claude-opus-4-7` on reasoning-heavy questions. |
+| `--model=<name>` | `claude-sonnet-4-6` | Try `claude-opus-4-8` on reasoning-heavy questions. |
 | `--search=<adapter>` | `duckduckgo` | `searxng` for privacy, `brave` for quality, `tavily` or `exa` for research-tuned results. |
 | `--max-sources=<n>` | `12` per round | Upper bound. Deep mode accumulates across rounds, capped each round. |
 | `--concurrency=<n>` | `4` | Parallel fetches. Bump on a fast connection. |
@@ -402,7 +402,7 @@ If you keep passing the same flags, persist them. `~/.deepdive/config.json` (ove
   "defaultProfile": "deep",
   "profiles": {
     "deep":  { "deep": 3, "maxSources": 16 },
-    "audit": { "model": "claude-opus-4-7", "deep": 4, "strictCites": true, "search": "brave" }
+    "audit": { "model": "claude-opus-4-8", "deep": 4, "strictCites": true, "search": "brave" }
   }
 }
 ```
@@ -602,7 +602,7 @@ diff  2026-05-07_120000_aaaaaaaa  →  2026-06-01_120000_bbbbbbbb
       25d apart · 2026-05-07 → 2026-06-01
 
   metadata
-    model     claude-sonnet-4-6 → claude-opus-4-7
+    model     claude-sonnet-4-6 → claude-opus-4-8
     sources   2
   sources   +1 / -1 / 1 shared
     + https://newsource.com/z
