@@ -53,6 +53,17 @@ test("scoreAuthority: ops/infra official project docs are primary (no docs. pref
   assert.equal(tierOf("https://git-scm.com/docs/git-rebase"), "primary");
 });
 
+test("scoreAuthority: OpenSSH/OpenBSD project hosts are primary", () => {
+  // Live-run receipt (#142): the official OpenSSH release notes — the source
+  // 16/18 of the answer's citations grounded to — scored `unknown`, so the
+  // run badged `mixed` and the release notes would lose a fetch slot to any
+  // recognized domain. Same class as the #130 hosts: canonical project sites
+  // with no docs./developer. prefix to save them.
+  assert.equal(tierOf("https://www.openssh.org/releasenotes.html"), "primary");
+  assert.equal(tierOf("https://www.openssh.com/security.html"), "primary");
+  assert.equal(tierOf("https://www.openbsd.org/faq/"), "primary");
+});
+
 test("scoreAuthority: the Stack Exchange network's own domains are reputable", () => {
   // serverfault.com / superuser.com / askubuntu.com are SE-network flagships
   // on their own domains — NOT subdomains of stackexchange.com, so the

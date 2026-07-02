@@ -45,6 +45,11 @@ const PRIMARY_DOMAINS = new Set([
   // niche-ops question kept 0 primary sources on BOTH sides because the
   // canonical doc hosts for its topic all scored unknown — #130).
   "nginx.org", "apache.org", "kernel.org", "php.net", "git-scm.com",
+  // same class, caught live: a run whose answer was almost entirely grounded
+  // in the official OpenSSH release notes badged `mixed` because the scorer
+  // couldn't see the project's own hosts (#142). openssh.org is the mirror
+  // search actually surfaces; openbsd.org is the parent project.
+  "openssh.com", "openssh.org", "openbsd.org",
 ]);
 
 const REPUTABLE_DOMAINS = new Set([
