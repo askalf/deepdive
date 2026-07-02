@@ -5,6 +5,7 @@
 // question page; deepdive's fetch step pulls the question + answers.
 
 import { searchTimeoutSignal, type SearchAdapter, type SearchResult } from "../search.js";
+import { keywordLadder } from "../query-keywords.js";
 
 interface SEItem {
   title?: string;
@@ -19,6 +20,23 @@ export class StackExchangeSearch implements SearchAdapter {
   constructor(private readonly site: string = "stackoverflow") {}
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    // /search/advanced is literal-match against the question corpus, so the
+    // planner's long natural-language queries routinely return ZERO — even for
+    // error-message questions the network is full of answers to (#131; the
+    // same failure #86 fixed for wikipedia). When the verbatim query finds
+    // nothing, walk progressively shorter keyword variants (4 → 2 → 1 leading
+    // content tokens) until one hits. At most 3 extra calls against a keyless
+    // API, and only on the would-have-been-empty path.
+    const verbatim = await this.searchRaw(query, limit, signal);
+    if (verbatim.length > 0) return verbatim;
+    for (const variant of keywordLadder(query)) {
+      const results = await this.searchRaw(variant, limit, signal);
+      if (results.length > 0) return results;
+    }
+    return [];
+  }
+
+  private async searchRaw(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
     const url = new URL("https://api.stackexchange.com/2.3/search/advanced");
     url.searchParams.set("order", "desc");
     url.searchParams.set("sort", "relevance");
