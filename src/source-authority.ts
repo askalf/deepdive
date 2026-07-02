@@ -41,11 +41,19 @@ const PRIMARY_DOMAINS = new Set([
   "developer.mozilla.org", "redis.io", "kubernetes.io", "rust-lang.org",
   "postgresql.org", "python.org", "nodejs.org", "go.dev", "react.dev",
   "aws.amazon.com", "cloud.google.com", "learn.microsoft.com", "docs.github.com",
+  // ops/infra project docs that carry no docs. prefix (the v0.26.1 board's
+  // niche-ops question kept 0 primary sources on BOTH sides because the
+  // canonical doc hosts for its topic all scored unknown — #130).
+  "nginx.org", "apache.org", "kernel.org", "php.net", "git-scm.com",
 ]);
 
 const REPUTABLE_DOMAINS = new Set([
   "wikipedia.org", "stackoverflow.com", "stackexchange.com", "github.com",
   "gitlab.com",
+  // The Stack Exchange network's flagship sites live on their OWN domains —
+  // not subdomains of stackexchange.com — so the entry above never covered
+  // them and the canonical ops Q&A scored unknown (#130).
+  "serverfault.com", "superuser.com", "askubuntu.com",
 ]);
 
 // Seed denylist of content-farm / AI-spam domains observed in the wild
