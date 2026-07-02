@@ -42,6 +42,27 @@ test("scoreAuthority: well-known references are reputable", () => {
   assert.equal(tierOf("https://github.com/askalf/deepdive"), "reputable");
 });
 
+test("scoreAuthority: ops/infra official project docs are primary (no docs. prefix to save them)", () => {
+  // v0.26.1 board: niche-ops kept 0 primary on both sides — these hosts are
+  // the canonical documentation for their projects but carry no
+  // docs./developer. prefix, so only the curated list can catch them (#130).
+  assert.equal(tierOf("https://nginx.org/en/docs/http/ngx_http_proxy_module.html"), "primary");
+  assert.equal(tierOf("https://httpd.apache.org/docs/2.4/"), "primary"); // subdomain of apache.org
+  assert.equal(tierOf("https://www.kernel.org/doc/html/latest/"), "primary");
+  assert.equal(tierOf("https://www.php.net/manual/en/"), "primary");
+  assert.equal(tierOf("https://git-scm.com/docs/git-rebase"), "primary");
+});
+
+test("scoreAuthority: the Stack Exchange network's own domains are reputable", () => {
+  // serverfault.com / superuser.com / askubuntu.com are SE-network flagships
+  // on their own domains — NOT subdomains of stackexchange.com, so the
+  // existing entry never covered them (#130).
+  assert.equal(tierOf("https://serverfault.com/questions/587386/"), "reputable");
+  assert.equal(tierOf("https://superuser.com/questions/1"), "reputable");
+  assert.equal(tierOf("https://askubuntu.com/questions/1"), "reputable");
+  assert.equal(tierOf("https://unix.stackexchange.com/questions/1"), "reputable"); // subdomain — already covered, pinned
+});
+
 test("scoreAuthority: seed content-farm denylist is low (and beats any boost)", () => {
   assert.equal(tierOf("https://aiflashreport.com/latest-llms"), "low");
   assert.equal(tierOf("https://gpt0x.com/models"), "low");
