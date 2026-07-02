@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed — the per-source word cap now spends its budget on query-relevant spans, not the document head (#145)
+
+The first real PDF ingest on a production runner (v0.27.1) fetched the 129-page NIST SP 800-63B-4, extracted all 18,265 words flawlessly — and then head-first truncation (`words.slice(0, maxWords)`) reduced it to title page, authors, abstract, and table of contents. The synthesizer, correctly refusing to cite what it could not see, answered from front matter and said so. Head-first is the worst heuristic for exactly the documents the source-authority axis works hardest to keep: long formal publications put their least informative words first.
+
+New `src/relevance-window.ts` (deterministic, LLM-free, zero new dependencies): when a source exceeds `--max-words-per-source`, the budget now goes to (1) a head anchor for document identity, (2) the fixed-size word windows scoring highest on content-token overlap with the question and the round's queries — the same token machinery as the keyword ladder (#86), reusing `trimPunctuation`'s index-walk normalization (the CodeQL-safe alternative to trim regexes) — and (3) document-order fill for any remaining budget, reassembled chronologically with `…` elision markers. Applied to both cap sites: the PDF path in `agent.ts` and `extractContent` (long HTML specs had the same failure mode). With no query terms or no matches, behavior degrades to exactly the old head-first cap. Pinned by `test/relevance-window.test.mjs`, including a fixture in the NIST failure shape — 2,600 words of front matter with the normative "SHALL NOT" text buried past the cap — asserting the old behavior misses it and the new behavior reaches it.
+
 ## [0.27.1] - 2026-07-02
 
 ### Fixed — OpenSSH/OpenBSD project hosts were invisible to source authority (#142)
