@@ -6,9 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-06-27
+
 ### Fixed — user-publishable `docs.` hosts no longer score as authoritative (#111)
 
 - **`docs.google.com` was scored `primary` (top authority, 1.0) by the `docs.` documentation-subdomain boost** — but `docs.google.com` is the Google Docs *app*, where anyone can publish a document (`/document/d/.../pub`), not Google's product documentation. So an arbitrary user-published Google Doc ranked as authoritative as `arxiv.org` or a `.gov` source: exactly the fabricable-source-scoring-as-trustworthy failure mode the source-authority axis exists to catch (#111), leaking in through the prefix rule's own blind spot. The `docs.` / `developer.` prefix boost now skips a small, auditable `DOCS_PREFIX_EXCLUSIONS` set; excluded hosts fall through to neutral `unknown` (not punished, just not boosted). Google's real product docs live at `developers.google.com` / `cloud.google.com` and are unaffected (the latter is already a curated primary domain). Pinned by a new case in `test/source-authority.test.mjs`.
+
+### Added — the source-trust badge reaches the HTML report (#111)
+
+- **The HTML export now carries the source-trust signal.** v0.26.0 surfaced source trust — the axis orthogonal to citation support: whether the sources themselves are credible, not just whether the claims are cited — in the CLI footer and `--json`, but not in the HTML export, so a fully-cited report built on content farms could be handed off looking clean. `renderTrustBadge()` adds the trust label to the report's meta line, reusing the same deterministic, LLM-free `summarizeSourceTrust` every other surface uses — one consistent signal everywhere. Only rendered when there is something to flag (`mixed`/`low`); a high-trust report stays clean, mirroring the CLI footer. The tooltip is HTML-escaped, with matching `.trust-low`/`.trust-mixed` styles. Pinned by new cases in `test/html-export.test.mjs`.
 
 ### Added — source authority reaches the search stage (#111 P4)
 
