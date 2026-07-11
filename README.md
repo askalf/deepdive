@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@askalf/deepdive"><img src="https://img.shields.io/npm/v/@askalf/deepdive?color=blue" alt="npm version"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/askalf/deepdive"><img src="https://img.shields.io/ossf-scorecard/github.com/askalf/deepdive?label=OpenSSF%20Scorecard&color=blue" alt="OpenSSF Scorecard"></a>
   <a href="https://github.com/askalf/deepdive/actions/workflows/ci.yml"><img src="https://github.com/askalf/deepdive/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/askalf/deepdive/blob/master/LICENSE"><img src="https://img.shields.io/npm/l/@askalf/deepdive" alt="License"></a>
 </p>
