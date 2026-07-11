@@ -103,7 +103,10 @@ test("agent: empty-post-filter round retries once with the allowed host appended
     name: "mock",
     async search(query) {
       queried.push(query);
-      if (query.includes("nvlpubs.nist.gov")) {
+      // The hint appends the bare host as a whitespace-separated token —
+      // match it that way (also keeps CodeQL's url-substring rule quiet;
+      // this is a query-string check in a fake, not URL sanitization).
+      if (query.split(/\s+/).includes("nvlpubs.nist.gov")) {
         return [{ url: "https://nvlpubs.nist.gov/target.pdf", title: "Target", snippet: "", rank: 1 }];
       }
       return [{ url: "https://seo-farm.example.com/page", title: "Farm", snippet: "", rank: 1 }];
