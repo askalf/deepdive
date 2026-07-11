@@ -6,8 +6,8 @@
 // sub-adapter failed, so the agent's zero-source handling still fires.
 
 import { dedupeKey } from "../url-util.js";
-import { isRateLimitError, SearchRateLimitError } from "../search.js";
-import type { SearchAdapter, SearchResult, SubAdapterFailure } from "../search.js";
+import { domainHintTokens, isRateLimitError, SearchRateLimitError } from "../search.js";
+import type { DomainHint, SearchAdapter, SearchResult, SubAdapterFailure } from "../search.js";
 import { rankByAuthority, type SourceAuthorityMode } from "../source-authority.js";
 import { extractKeywords } from "../query-keywords.js";
 
@@ -55,6 +55,41 @@ export class MultiSearch implements SearchAdapter {
   }
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+    return this.fanOut(query, limit, (a) => a.search(query, limit, signal));
+  }
+
+  // #157 — dispatch an allow-domain hint per sub-adapter: engine-syntax
+  // backends run their own site: form; fixed-domain backends are SKIPPED
+  // (they cannot act on a hint, and the plain pass already asked them — a
+  // literal-match API re-walking its keyword ladder over an unsatisfiable
+  // hinted string was the receipted waste this fixes); open-web backends
+  // without query syntax get the token form. When no sub-adapter can act on
+  // the hint at all, resolves to [] — that's "nothing to try", not a failure.
+  async searchHinted(
+    query: string,
+    hint: DomainHint,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
+    return this.fanOut(
+      query,
+      limit,
+      (a) =>
+        a.searchHinted
+          ? a.searchHinted(query, hint, limit, signal)
+          : a.search(domainHintTokens(query, hint.hosts), limit, signal),
+      (a) => a.searchHinted !== undefined || a.servesDomains === undefined,
+    );
+  }
+
+  // Shared fan-out machinery: benched bookkeeping, partial-failure tolerance,
+  // all-failed classification, authority-and-relevance-ordered merge.
+  private async fanOut(
+    query: string,
+    limit: number,
+    run: (a: SearchAdapter) => Promise<SearchResult[]>,
+    eligible?: (a: SearchAdapter) => boolean,
+  ): Promise<SearchResult[]> {
     this.lastFailures = this.adapters
       .filter((a) => this.benched.has(a.name))
       .map((a) => ({
@@ -62,14 +97,18 @@ export class MultiSearch implements SearchAdapter {
         message: "rate-limited earlier in this run; skipped",
         rateLimited: true,
       }));
-    const active = this.adapters.filter((a) => !this.benched.has(a.name));
+    let active = this.adapters.filter((a) => !this.benched.has(a.name));
     if (active.length === 0) {
       throw new SearchRateLimitError(this.name, "every sub-adapter is rate-limited");
+    }
+    if (eligible) {
+      active = active.filter(eligible);
+      if (active.length === 0) return [];
     }
     const settled = await Promise.allSettled(
       // Ask each backend for the full limit — each ranks its own world and
       // interleave + dedupe below trims the merged pool back down.
-      active.map((a) => a.search(query, limit, signal)),
+      active.map((a) => run(a)),
     );
     const lists: SearchResult[][] = [];
     const failures: string[] = [];

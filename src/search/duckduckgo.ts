@@ -8,6 +8,8 @@
 import {
   searchTimeoutSignal,
   SearchRateLimitError,
+  siteOperatorQuery,
+  type DomainHint,
   type SearchAdapter,
   type SearchResult,
 } from "../search.js";
@@ -46,6 +48,16 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 export class DuckDuckGoSearch implements SearchAdapter {
   readonly name = "duckduckgo";
   private lastRequestAt = 0;
+
+  // #157 — DDG supports the site: operator; see SearXNGSearch.searchHinted.
+  searchHinted(
+    query: string,
+    hint: DomainHint,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
+    return this.search(siteOperatorQuery(query, hint.hosts), limit, signal);
+  }
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
     const wait = this.lastRequestAt + requestSpacingMs() - Date.now();

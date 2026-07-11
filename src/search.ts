@@ -11,6 +11,13 @@ export interface SearchResult {
   rank: number;
 }
 
+// #157 — the allow-domain hint passed to searchHinted. Hosts are the
+// normalized --allow-domain patterns; how an adapter expresses the bias is
+// its own business (engine syntax, API filter, or token fallback).
+export interface DomainHint {
+  hosts: readonly string[];
+}
+
 export interface SearchAdapter {
   readonly name: string;
   // #147 — the fixed set of registrable domains this adapter's results can
@@ -21,6 +28,45 @@ export interface SearchAdapter {
   // no-sources message says so instead.
   readonly servesDomains?: readonly string[];
   search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]>;
+  // #157 — optional: run `query` biased toward hint.hosts. Adapters that pass
+  // engine query syntax through (searxng, ddg, brave) implement this with the
+  // site: operator — a directive, not a relevance nudge (the v0.29.0 receipt
+  // showed a bare host token can't steer an aggregator's ranking: hinted
+  // retries fired ×3 and still surfaced zero allowed-host results). Fan-outs
+  // dispatch per sub-adapter and skip backends that structurally can't serve
+  // the hosts. Absent → callers fall back to domainHintTokens.
+  searchHinted?(
+    query: string,
+    hint: DomainHint,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]>;
+}
+
+// #157 — engine-syntax form of the hint: `site:` restricts rather than
+// suggests. Multiple hosts use the OR form (Google honors it; engines that
+// don't degrade to plain matching — the domain filter still enforces).
+export function siteOperatorQuery(query: string, hosts: readonly string[]): string {
+  if (hosts.length === 0) return query;
+  if (hosts.length === 1) return `${query} site:${hosts[0]}`;
+  return `${query} (${hosts.map((h) => `site:${h}`).join(" OR ")})`;
+}
+
+// #157 — token form of the hint, for backends with no query syntax: the
+// host(s) plus their leading label (`nvlpubs.nist.gov` → also `nvlpubs`).
+// The 7/2 probe that motivated #147 ranked the target #1 with the bare label
+// where the v0.29.0 full-host token failed — engines tokenize hostnames
+// URL-ish, but the label matches page text and URL fragments.
+export function domainHintTokens(query: string, hosts: readonly string[]): string {
+  const extra: string[] = [];
+  for (const h of hosts) {
+    extra.push(h);
+    const label = h.split(".")[0];
+    if (label.length >= 3 && label !== "www" && !extra.includes(label)) {
+      extra.push(label);
+    }
+  }
+  return extra.length > 0 ? `${query} ${extra.join(" ")}` : query;
 }
 
 // Typed "the backend is refusing us because we asked too often" error —

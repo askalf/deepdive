@@ -1,10 +1,26 @@
 // Brave Search API adapter. Requires DEEPDIVE_BRAVE_KEY.
 
-import { searchTimeoutSignal, type SearchAdapter, type SearchResult } from "../search.js";
+import {
+  searchTimeoutSignal,
+  siteOperatorQuery,
+  type DomainHint,
+  type SearchAdapter,
+  type SearchResult,
+} from "../search.js";
 
 export class BraveSearch implements SearchAdapter {
   readonly name = "brave";
   constructor(private readonly key: string) {}
+
+  // #157 — Brave supports the site: operator; see SearXNGSearch.searchHinted.
+  searchHinted(
+    query: string,
+    hint: DomainHint,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
+    return this.search(siteOperatorQuery(query, hint.hosts), limit, signal);
+  }
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
     const url = new URL("https://api.search.brave.com/res/v1/web/search");

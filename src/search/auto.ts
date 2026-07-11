@@ -3,7 +3,7 @@
 // Exposes `lastEngine` so the agent can surface which engine served each
 // query in `search.done` events.
 
-import type { SearchAdapter, SearchResult } from "../search.js";
+import { siteOperatorQuery, type DomainHint, type SearchAdapter, type SearchResult } from "../search.js";
 
 export class AutoSearch implements SearchAdapter {
   readonly name = "auto";
@@ -14,6 +14,17 @@ export class AutoSearch implements SearchAdapter {
     private readonly fallback: SearchAdapter | null,
   ) {
     this.lastEngine = primary.name;
+  }
+
+  // #157 — both engines auto wraps (ddg, brave) speak site:, so the hinted
+  // form rides the same primary→fallback path as a plain search.
+  searchHinted(
+    query: string,
+    hint: DomainHint,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
+    return this.search(siteOperatorQuery(query, hint.hosts), limit, signal);
   }
 
   async search(

@@ -132,12 +132,107 @@ test("agent: empty-post-filter round retries once with the allowed host appended
     assert.equal(calls.length, 2, "plan + synth — the hinted retry recovered the run");
     assert.equal(events.length, 1);
     assert.deepEqual(events[0].hosts, ["nvlpubs.nist.gov"]);
-    assert.deepEqual(events[0].queries, ["q1 nvlpubs.nist.gov", "q2 nvlpubs.nist.gov"]);
+    // #157 — token form for adapters without searchHinted: host + its
+    // leading label (the label is what tokenizing engines actually match).
+    assert.deepEqual(events[0].queries, [
+      "q1 nvlpubs.nist.gov nvlpubs",
+      "q2 nvlpubs.nist.gov nvlpubs",
+    ]);
     assert.deepEqual(
       queried,
-      ["q1", "q2", "q1 nvlpubs.nist.gov", "q2 nvlpubs.nist.gov"],
+      ["q1", "q2", "q1 nvlpubs.nist.gov nvlpubs", "q2 nvlpubs.nist.gov nvlpubs"],
       "one plain pass, one hinted pass, nothing more",
     );
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: hinted retry uses the adapter's searchHinted (site: form) when it has one", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const synthText = "Site-hinted answer [1].";
+  const { server, calls } = makeLLMServer([planJson, synthText]);
+  const baseUrl = await startServer(server);
+
+  const plainQueried = [];
+  const hintedCalls = [];
+  const search = {
+    name: "engine",
+    async search(query) {
+      plainQueried.push(query);
+      return [{ url: "https://seo-farm.example.com/page", title: "Farm", snippet: "", rank: 1 }];
+    },
+    // #157 — engine-syntax backend: receives the RAW query + structured hint,
+    // formats site: itself (mirrored here by just honoring the hosts).
+    async searchHinted(query, hint) {
+      hintedCalls.push({ query, hosts: [...hint.hosts] });
+      return [{ url: "https://nvlpubs.nist.gov/target.pdf", title: "Target", snippet: "", rank: 1 }];
+    },
+  };
+  const events = [];
+
+  try {
+    const result = await runAgent("q", {
+      ...BASE_CONFIG,
+      llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+      search,
+      domainFilter: { allow: ["nvlpubs.nist.gov"], deny: [] },
+      browserFactory: mockBrowserFactory({
+        "https://nvlpubs.nist.gov/target.pdf": { text: LOREM, title: "Target" },
+      }),
+      onEvent: (e) => {
+        if (e.type === "search.hinted") events.push(e);
+      },
+    });
+    assert.equal(result.sources.length, 1);
+    assert.equal(result.sources[0].url, "https://nvlpubs.nist.gov/target.pdf");
+    assert.equal(calls.length, 2, "recovered via the structured hint");
+    assert.deepEqual(hintedCalls, [{ query: "q1", hosts: ["nvlpubs.nist.gov"] }],
+      "searchHinted gets the RAW query plus structured hosts — no token-baked string");
+    assert.deepEqual(plainQueried, ["q1"], "plain search ran only in the plain pass");
+    assert.equal(events.length, 1);
+    // display form shows what engine-syntax backends actually send
+    assert.deepEqual(events[0].queries, ["q1 site:nvlpubs.nist.gov"]);
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("agent: a structurally deaf primary is never hinted", async () => {
+  const planJson = '{"queries":["q1"]}';
+  const { server, calls } = makeLLMServer([planJson]);
+  const baseUrl = await startServer(server);
+
+  const queried = [];
+  const search = {
+    name: "wikipedia",
+    servesDomains: ["wikipedia.org"],
+    async search(query) {
+      queried.push(query);
+      return [{ url: "https://en.wikipedia.org/wiki/Thing", title: "Thing", snippet: "", rank: 1 }];
+    },
+  };
+  const events = [];
+
+  try {
+    let err;
+    try {
+      await runAgent("q", {
+        ...BASE_CONFIG,
+        llm: { baseUrl, apiKey: "t", model: "test", maxTokens: 512 },
+        search,
+        domainFilter: { allow: ["nvlpubs.nist.gov"], deny: [] },
+        browserFactory: mockBrowserFactory({}),
+        onEvent: (e) => {
+          if (e.type === "search.hinted") events.push(e);
+        },
+      });
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err instanceof NoSourcesError);
+    assert.deepEqual(queried, ["q1"], "no hinted pass — the corpus can't contain the allowed host");
+    assert.equal(events.length, 0);
   } finally {
     await stopServer(server);
   }
