@@ -9,8 +9,13 @@
 // backed by an on-disk cache (src/cache.ts) so re-running a question is cheap.
 
 import { withModel, type LLMConfig } from "./llm.js";
-import type { SearchAdapter, SearchResult, SubAdapterFailure } from "./search.js";
-import { dedupeByUrl, isRateLimitError } from "./search.js";
+import type { DomainHint, SearchAdapter, SearchResult, SubAdapterFailure } from "./search.js";
+import {
+  dedupeByUrl,
+  domainHintTokens,
+  isRateLimitError,
+  siteOperatorQuery,
+} from "./search.js";
 import {
   rankByAuthority,
   selectWithHostCap,
@@ -395,17 +400,28 @@ export async function runAgent(
   // One pass of a round's queries through an adapter. Mutates the shared
   // candidate pool / seen-URL set / error log; used for the primary adapter
   // every round and for the optional fallback adapter when the primary
-  // produced nothing.
+  // produced nothing. #157: with `domainHint` set (the allow-domain hinted
+  // retry), an adapter that implements searchHinted expresses the bias its
+  // own way (site: operator on engine-syntax backends; per-sub dispatch in
+  // multi:); adapters without it get the token form appended to the query.
   async function runSearchPass(
     adapter: SearchAdapter,
     queries: string[],
+    domainHint?: DomainHint,
   ): Promise<void> {
-    for (const query of queries) {
+    for (const rawQuery of queries) {
       if (signal?.aborted) throw new Error("aborted");
+      const query =
+        domainHint && !adapter.searchHinted
+          ? domainHintTokens(rawQuery, domainHint.hosts)
+          : rawQuery;
       emit(config, { type: "search.start", query });
       let results: SearchResult[];
       try {
-        results = await adapter.search(query, config.resultsPerQuery, signal);
+        results =
+          domainHint && adapter.searchHinted
+            ? await adapter.searchHinted(rawQuery, domainHint, config.resultsPerQuery, signal)
+            : await adapter.search(query, config.resultsPerQuery, signal);
       } catch (err) {
         // A failed search shouldn't sink the round — record it, surface it
         // as an event, and move on. The zero-source guard below catches the
@@ -544,22 +560,37 @@ export async function runAgent(
       // #147 — under --allow-domain the planner's semantic queries routinely
       // don't surface the allowed host at all, and the filter then drops the
       // whole round: identical invocations flip between a full answer and
-      // exit 3. Before falling back, retry the round's queries once with the
-      // allowed host(s) appended as a relevance hint — only on the would-fail
-      // path, and not when the primary is rate-limiting (the retry would
-      // hammer the limiter that just refused).
+      // exit 3. Before falling back, retry the round's queries once with a
+      // domain hint — only on the would-fail path, and not when the primary
+      // is rate-limiting (the retry would hammer the limiter that just
+      // refused). #157: the hint is adapter-aware (site: on engine-syntax
+      // backends, per-sub dispatch in multi:, tokens elsewhere — the v0.29.0
+      // receipt showed a bare host token can't steer an aggregator), and a
+      // primary that structurally can't serve the allow list is not hinted
+      // at all — it can't be steered into a corpus it doesn't have.
       const allowHosts = (config.domainFilter?.allow ?? [])
         .map(normalizePattern)
         .filter((h) => h.length > 0);
+      const primaryCanServe =
+        config.search.servesDomains === undefined ||
+        canServeAllowedDomain(config.search.servesDomains, allowHosts);
       if (
         allCandidates.length === candidatesBefore &&
         allowHosts.length > 0 &&
+        primaryCanServe &&
         !searchErrors.slice(searchErrorsBefore).some((e) => e.rateLimited)
       ) {
-        const hinted = queriesForRound.map((q) => `${q} ${allowHosts.join(" ")}`);
+        // Display form only — searchHinted adapters format internally (the
+        // site: string shown is what engine-syntax backends actually send;
+        // token-form backends send domainHintTokens).
+        const hinted = queriesForRound.map((q) =>
+          config.search.searchHinted
+            ? siteOperatorQuery(q, allowHosts)
+            : domainHintTokens(q, allowHosts),
+        );
         emit(config, { type: "search.hinted", hosts: allowHosts, queries: hinted });
         allQueries.push(...hinted);
-        await runSearchPass(config.search, hinted);
+        await runSearchPass(config.search, queriesForRound, { hosts: allowHosts });
       }
       // Recovery pass: zero candidates from the primary (throttled, down, or
       // genuinely empty) and a fallback is configured — re-run the round's

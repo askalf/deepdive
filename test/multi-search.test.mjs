@@ -348,3 +348,44 @@ test("interleaveResults: relevance never reorders across tiers, off ignores it",
     "https://nginx.org/docs",
   ]);
 });
+
+// ── #157: hinted-pass dispatch per sub-adapter ───────────────────────────────
+
+test("multi: searchHinted dispatches structured hints, skips fixed-domain subs, tokens the rest", async () => {
+  const calls = [];
+  const engine = {
+    name: "searxng",
+    async search(q) { calls.push(["searxng.search", q]); return []; },
+    async searchHinted(q, hint) {
+      calls.push(["searxng.hinted", q, hint.hosts.join(",")]);
+      return [{ url: "https://nvlpubs.nist.gov/x", title: "t", snippet: "", rank: 1 }];
+    },
+  };
+  const fixed = {
+    name: "stackexchange",
+    servesDomains: ["stackoverflow.com"],
+    async search(q) { calls.push(["se.search", q]); return []; },
+  };
+  const open = {
+    name: "news",
+    async search(q) { calls.push(["news.search", q]); return []; },
+  };
+  const multi = new MultiSearch([engine, fixed, open]);
+  const results = await multi.searchHinted("q", { hosts: ["nvlpubs.nist.gov"] }, 5);
+  assert.equal(results.length, 1);
+  assert.deepEqual(calls.sort(), [
+    ["news.search", "q nvlpubs.nist.gov nvlpubs"],
+    ["searxng.hinted", "q", "nvlpubs.nist.gov"],
+  ].sort(), "engine got the structured hint, SE was skipped, open-web got tokens");
+});
+
+test("multi: searchHinted resolves to [] when no sub-adapter can act on the hint", async () => {
+  const deaf = (name, domain) => ({
+    name,
+    servesDomains: [domain],
+    async search() { throw new Error(`${name} should not be asked`); },
+  });
+  const multi = new MultiSearch([deaf("se", "stackoverflow.com"), deaf("wiki", "wikipedia.org")]);
+  const results = await multi.searchHinted("q", { hosts: ["nvlpubs.nist.gov"] }, 5);
+  assert.deepEqual(results, [], "nothing to try is not a failure");
+});

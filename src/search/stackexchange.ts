@@ -15,9 +15,28 @@ interface SEItem {
   is_answered?: boolean;
 }
 
+// The network's flagship sites live on their OWN domains, not subdomains of
+// stackexchange.com (#130's scorer lesson, needed adapter-side too).
+const SE_FLAGSHIP_DOMAINS: Record<string, string> = {
+  stackoverflow: "stackoverflow.com",
+  serverfault: "serverfault.com",
+  superuser: "superuser.com",
+  askubuntu: "askubuntu.com",
+  mathoverflow: "mathoverflow.net",
+};
+
 export class StackExchangeSearch implements SearchAdapter {
   readonly name = "stackexchange";
-  constructor(private readonly site: string = "stackoverflow") {}
+  // #157 — the API answers for exactly one site, and /search/advanced is
+  // literal-match: it can neither serve another host nor act on a domain
+  // hint. Declaring the serving set lets the structural gates (hinted retry,
+  // allow-domain fallback) skip this adapter instead of burning keyless
+  // calls walking the keyword ladder over an unsatisfiable query — the
+  // exact waste #157's live receipt showed.
+  readonly servesDomains: readonly string[];
+  constructor(private readonly site: string = "stackoverflow") {
+    this.servesDomains = [SE_FLAGSHIP_DOMAINS[site] ?? `${site}.stackexchange.com`];
+  }
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
     // /search/advanced is literal-match against the question corpus, so the

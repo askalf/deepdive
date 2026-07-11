@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed — the allow-domain hint becomes a directive, not a suggestion (#157)
+
+v0.29.0's receipt protocol (the NIST question ×3 with `--allow-domain=nvlpubs.nist.gov` on the production runner) came back **1/3 — unchanged from baseline** — and the diagnostics said exactly why: the hinted retry fired on every failing run ("10 queries"), but a bare host token appended to the query cannot steer an aggregator's ranking, and two of the fan-out's three backends can't respond to a host hint at all. Honest exit-3s are good; recovered runs are better. Three changes, all on the hinted-retry path:
+
+- **Engine-syntax backends get `searchHinted`** (new optional `SearchAdapter` capability): searxng, duckduckgo, brave, and `auto` express the hint as `site:<host>` — a directive the engine enforces, not a relevance nudge it may ignore. Multiple allow hosts use the OR form. The adapter receives the RAW query plus a structured `DomainHint`; nothing is token-baked upstream.
+- **`multi:` dispatches the hint per sub-adapter**: subs with `searchHinted` run their own form; **fixed-domain subs are skipped** (a literal-match API can't act on a hint, and the plain pass already asked it — the receipted waste was stackexchange's keyword ladder re-walking an unsatisfiable hinted string); open-web subs without query syntax get the improved token form. All subs skipped → the hinted pass resolves empty instead of failing. The stackexchange adapter now declares its one-site `servesDomains` (flagship sites map to their own domains — the #130 lesson, adapter-side), which also tightens the #147 fallback gate for it. A structurally deaf **primary** is not hinted at all.
+- **The token fallback gains the host's leading label** (`nvlpubs.nist.gov` → also `nvlpubs`): the 7/2 probe that motivated #147 ranked the target #1 with the bare label where the v0.29.0 full-host token failed — engines tokenize hostnames URL-ish, but the label matches page text and URL fragments.
+
+Pinned by `test/domain-hint.test.mjs` (formatters, per-leaf `site:` delegation, auto's primary→fallback hint path, SE serving-set map), new `multi:` dispatch cases (structured/skip/token routing; all-deaf → `[]`), and agent cases (structured hint used and event display, deaf primary never hinted, token+label form). Receipt protocol unchanged: same question ×3 on the runner, target 3/3.
+
 ## [0.29.0] - 2026-07-11
 
 ### Fixed — `--allow-domain` is no longer a coin flip (#147)
