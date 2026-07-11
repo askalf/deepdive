@@ -66,6 +66,35 @@ export function normalizePattern(raw: string): string {
   return s;
 }
 
+// #147 — true iff SOME hostname under one of `servesDomains` could pass the
+// allow list. An adapter serving wikipedia.org produces hosts like
+// en.wikipedia.org, which pass allow=wikipedia.org (host under pattern) AND
+// allow=en.wikipedia.org (pattern under serving domain) — so overlap in
+// either suffix direction counts. Empty allow list matches everything.
+// Used by the agent to detect a structurally useless fallback pass.
+export function canServeAllowedDomain(
+  servesDomains: readonly string[],
+  allow: readonly string[],
+): boolean {
+  if (allow.length === 0) return true;
+  for (const rawServed of servesDomains) {
+    const served = normalizePattern(rawServed);
+    if (!served) continue;
+    for (const rawAllow of allow) {
+      const allowed = normalizePattern(rawAllow);
+      if (!allowed) continue;
+      if (
+        served === allowed ||
+        served.endsWith("." + allowed) ||
+        allowed.endsWith("." + served)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Splits a comma-separated string into a normalized pattern list.
 // Exported for CLI / config parsing.
 export function parseDomainList(s: string | undefined): string[] {

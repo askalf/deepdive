@@ -118,6 +118,26 @@ test("renderNoSourcesMessage: candidates-but-none-kept names the fetch side", ()
   assert.match(out, /--verbose/);
 });
 
+test("renderNoSourcesMessage: domain-filter drop is named, with filter-specific advice (#147)", () => {
+  const err = new NoSourcesError("searxng", ["q1", "q2"], 0, [], {
+    droppedByDomainFilter: 7,
+  });
+  const out = renderNoSourcesMessage(err);
+  assert.match(out, /the domain filter dropped every one/);
+  assert.match(out, /dropped all 7 result\(s\)/);
+  assert.match(out, /widen the filter/);
+  assert.doesNotMatch(out, /rephrase the question/);
+});
+
+test("renderNoSourcesMessage: structurally skipped fallback is named (#147)", () => {
+  const err = new NoSourcesError("searxng", ["q1"], 0, [], {
+    droppedByDomainFilter: 3,
+    fallbackSkipped: "wikipedia",
+  });
+  const out = renderNoSourcesMessage(err);
+  assert.match(out, /fallback \(wikipedia\) skipped: its results cannot satisfy --allow-domain/);
+});
+
 test("renderNoSourcesMessage: caps the listed search errors at 3", () => {
   const errors = Array.from({ length: 5 }, (_, i) => ({
     query: `q${i}`,

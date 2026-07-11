@@ -13,6 +13,13 @@ export interface SearchResult {
 
 export interface SearchAdapter {
   readonly name: string;
+  // #147 — the fixed set of registrable domains this adapter's results can
+  // ever live on, when that set is knowable up front (wikipedia → wikipedia.org).
+  // Undefined means open web. The agent's fallback gate uses this under
+  // --allow-domain: a fallback whose entire serving set fails the allow list
+  // would burn its calls on a guaranteed-empty pass, so it is skipped and the
+  // no-sources message says so instead.
+  readonly servesDomains?: readonly string[];
   search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]>;
 }
 

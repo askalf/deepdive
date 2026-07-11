@@ -43,6 +43,16 @@ export class MultiSearch implements SearchAdapter {
     this.name = `multi(${adapters.map((a) => a.name).join(",")})`;
   }
 
+  // #147 — the fan-out's serving set is the union of its sub-adapters', and
+  // only knowable when EVERY sub-adapter declares one: a single open-web
+  // backend (ddg, searxng, news…) means results can come from anywhere, so
+  // the whole fan-out reports open web (undefined).
+  get servesDomains(): readonly string[] | undefined {
+    const sets = this.adapters.map((a) => a.servesDomains);
+    if (sets.some((s) => s === undefined)) return undefined;
+    return [...new Set(sets.flatMap((s) => [...s!]))];
+  }
+
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
     this.lastFailures = this.adapters
       .filter((a) => this.benched.has(a.name))

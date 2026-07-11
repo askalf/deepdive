@@ -20,6 +20,10 @@ interface WikiSearchItem {
 
 export class WikipediaSearch implements SearchAdapter {
   readonly name = "wikipedia";
+  // Every result is a {lang}.wikipedia.org article URL (wikipediaArticleUrl
+  // below) — declared so the #147 fallback gate can tell when --allow-domain
+  // makes this adapter structurally useless.
+  readonly servesDomains = ["wikipedia.org"];
   constructor(private readonly lang: string = "en") {}
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {

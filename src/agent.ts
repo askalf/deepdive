@@ -42,7 +42,12 @@ import {
   findNearDuplicate,
   DEFAULT_NEAR_DUPE_THRESHOLD,
 } from "./similarity.js";
-import { classifyUrl, type DomainFilter } from "./domain-filter.js";
+import {
+  canServeAllowedDomain,
+  classifyUrl,
+  normalizePattern,
+  type DomainFilter,
+} from "./domain-filter.js";
 import type { PageCache } from "./cache.js";
 import { runConcurrent } from "./concurrency.js";
 import {
@@ -158,6 +163,15 @@ export type AgentEvent =
   // v0.20.0 — the round's primary searches produced zero candidates and the
   // configured fallback adapter is about to re-run the round's queries.
   | { type: "search.fallback"; adapter: string; queries: string[] }
+  // #147 — the round produced zero candidates under --allow-domain, so the
+  // primary adapter is about to retry the round's queries with the allowed
+  // host(s) appended as a relevance hint (the filter stays the enforcement
+  // layer; the hint makes survivors likely to exist).
+  | { type: "search.hinted"; hosts: string[]; queries: string[] }
+  // #147 — the fallback pass was skipped because every URL the fallback
+  // adapter can produce (servesDomains) fails the active --allow-domain
+  // list; running it would burn calls on a guaranteed-empty outcome.
+  | { type: "search.fallback-skipped"; adapter: string; allow: string[] }
   // v0.21.0 — a fan-out (multi:) search succeeded but one or more of its
   // sub-adapters failed. Without this, a rate-limited backend hides inside
   // multi's partial-failure tolerance and the source pool thins silently.
@@ -257,21 +271,35 @@ export interface SearchErrorInfo {
 // with diagnostics is cheaper and more honest; the CLI renders a
 // what-to-try-next message from the structured fields.
 export class NoSourcesError extends Error {
+  // #147 — how many search results the domain filter (--allow-domain /
+  // --deny-domain) dropped before the pipeline came up empty. "Returned 0
+  // usable results" is misleading when search returned plenty and the filter
+  // ate them all; the message and the CLI's advice branch on this.
+  public readonly droppedByDomainFilter: number;
+  // #147 — set when the fallback pass was skipped because its adapter's
+  // entire serving set fails the active allow list (adapter name).
+  public readonly fallbackSkipped?: string;
   constructor(
     public readonly adapter: string,
     public readonly queries: string[],
     public readonly candidatesFound: number,
     public readonly searchErrors: SearchErrorInfo[],
+    opts: { droppedByDomainFilter?: number; fallbackSkipped?: string } = {},
   ) {
     const n = queries.length;
+    const dropped = opts.droppedByDomainFilter ?? 0;
     super(
-      candidatesFound === 0
-        ? `no sources gathered: ${n} quer${n === 1 ? "y" : "ies"} via ${adapter} returned 0 usable results${
-            searchErrors.some((e) => e.rateLimited) ? " (rate-limited)" : ""
-          }`
-        : `no sources gathered: ${candidatesFound} candidate(s) found but none could be fetched and extracted`,
+      candidatesFound > 0
+        ? `no sources gathered: ${candidatesFound} candidate(s) found but none could be fetched and extracted`
+        : dropped > 0
+          ? `no sources gathered: ${n} quer${n === 1 ? "y" : "ies"} via ${adapter} found ${dropped} result(s), but the domain filter dropped every one`
+          : `no sources gathered: ${n} quer${n === 1 ? "y" : "ies"} via ${adapter} returned 0 usable results${
+              searchErrors.some((e) => e.rateLimited) ? " (rate-limited)" : ""
+            }`,
     );
     this.name = "NoSourcesError";
+    this.droppedByDomainFilter = dropped;
+    if (opts.fallbackSkipped !== undefined) this.fallbackSkipped = opts.fallbackSkipped;
   }
 }
 
@@ -348,6 +376,11 @@ export async function runAgent(
   const allCandidates: Candidate[] = [];
   const allQueries: string[] = [];
   const searchErrors: SearchErrorInfo[] = [];
+  // #147 — results the domain filter dropped, and whether a fallback pass was
+  // structurally skipped. Both feed NoSourcesError so the exit-3 message can
+  // name what actually happened instead of "returned 0 usable results".
+  let droppedByDomainFilter = 0;
+  let fallbackSkippedStructurally: string | undefined;
   const keptSources: SourceWithContent[] = [];
   // Shingle sets for near-dup detection, lazily synced to keptSources so
   // include[]/preKept entries (pushed below without touching this array)
@@ -397,6 +430,7 @@ export async function runAgent(
         if (config.domainFilter) {
           const verdict = classifyUrl(r.url, config.domainFilter);
           if (verdict !== "allow") {
+            droppedByDomainFilter++;
             emit(config, {
               type: "fetch.skipped",
               url: r.url,
@@ -501,18 +535,56 @@ export async function runAgent(
       ];
 
       const candidatesBefore = allCandidates.length;
+      const searchErrorsBefore = searchErrors.length;
       await runSearchPass(config.search, queriesForRound);
+      // #147 — under --allow-domain the planner's semantic queries routinely
+      // don't surface the allowed host at all, and the filter then drops the
+      // whole round: identical invocations flip between a full answer and
+      // exit 3. Before falling back, retry the round's queries once with the
+      // allowed host(s) appended as a relevance hint — only on the would-fail
+      // path, and not when the primary is rate-limiting (the retry would
+      // hammer the limiter that just refused).
+      const allowHosts = (config.domainFilter?.allow ?? [])
+        .map(normalizePattern)
+        .filter((h) => h.length > 0);
+      if (
+        allCandidates.length === candidatesBefore &&
+        allowHosts.length > 0 &&
+        !searchErrors.slice(searchErrorsBefore).some((e) => e.rateLimited)
+      ) {
+        const hinted = queriesForRound.map((q) => `${q} ${allowHosts.join(" ")}`);
+        emit(config, { type: "search.hinted", hosts: allowHosts, queries: hinted });
+        allQueries.push(...hinted);
+        await runSearchPass(config.search, hinted);
+      }
       // Recovery pass: zero candidates from the primary (throttled, down, or
       // genuinely empty) and a fallback is configured — re-run the round's
       // queries through it once. Runs ALL the round's queries, including any
-      // the primary's rate-limit short-circuit skipped.
+      // the primary's rate-limit short-circuit skipped. #147: when the
+      // fallback's declared serving set cannot satisfy the active allow list,
+      // every result it returns would be dropped by the same filter that just
+      // emptied the round — skip the structural no-op and record why.
       if (allCandidates.length === candidatesBefore && config.fallbackSearch) {
-        emit(config, {
-          type: "search.fallback",
-          adapter: config.fallbackSearch.name,
-          queries: queriesForRound,
-        });
-        await runSearchPass(config.fallbackSearch, queriesForRound);
+        const serves = config.fallbackSearch.servesDomains;
+        if (
+          allowHosts.length > 0 &&
+          serves !== undefined &&
+          !canServeAllowedDomain(serves, allowHosts)
+        ) {
+          fallbackSkippedStructurally = config.fallbackSearch.name;
+          emit(config, {
+            type: "search.fallback-skipped",
+            adapter: config.fallbackSearch.name,
+            allow: allowHosts,
+          });
+        } else {
+          emit(config, {
+            type: "search.fallback",
+            adapter: config.fallbackSearch.name,
+            queries: queriesForRound,
+          });
+          await runSearchPass(config.fallbackSearch, queriesForRound);
+        }
       }
       const candidatesFoundThisRound = allCandidates.length - candidatesBefore;
 
@@ -654,6 +726,12 @@ export async function runAgent(
           allQueries,
           allCandidates.length,
           searchErrors,
+          {
+            droppedByDomainFilter,
+            ...(fallbackSkippedStructurally !== undefined
+              ? { fallbackSkipped: fallbackSkippedStructurally }
+              : {}),
+          },
         );
       }
 
