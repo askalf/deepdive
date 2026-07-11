@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-07-11
+
 ### Fixed — `--allow-domain` is no longer a coin flip (#147)
 
 Live receipt on v0.27.1: the same question with `--allow-domain=nvlpubs.nist.gov` run three times gave one full answer and two `exit 3`s — while a raw search probe carrying the host name found the target PDF at rank 1 throughout. Two compounding causes, both fixed:
