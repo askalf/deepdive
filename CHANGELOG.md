@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-07-11
+
 ### Changed — the allow-domain hint becomes a directive, not a suggestion (#157)
 
 v0.29.0's receipt protocol (the NIST question ×3 with `--allow-domain=nvlpubs.nist.gov` on the production runner) came back **1/3 — unchanged from baseline** — and the diagnostics said exactly why: the hinted retry fired on every failing run ("10 queries"), but a bare host token appended to the query cannot steer an aggregator's ranking, and two of the fan-out's three backends can't respond to a host hint at all. Honest exit-3s are good; recovered runs are better. Three changes, all on the hinted-retry path:
