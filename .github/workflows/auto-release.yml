@@ -3,20 +3,22 @@ name: Auto release on version bump
 # Fires on merge of ANY PR to master. Exits early unless package.json's
 # `version` field differs from the parent commit's — so PRs that don't
 # touch version are cheap no-ops (~10s). When the version did change,
-# creates the matching `vX.Y.Z` tag + GitHub release AND publishes to
-# npm inline — both steps in the same job.
+# builds+tests, creates the matching `vX.Y.Z` tag + GitHub release, then
+# DISPATCHES publish.yml, which does the actual npm publish via OIDC
+# trusted publishing (tokenless — npm's trusted publisher for
+# @askalf/deepdive is bound to the publish.yml filename).
 #
-# Why inline-publish rather than relying on publish.yml's `release:
-# published` trigger: GitHub intentionally doesn't fire other workflows
-# for events created by GITHUB_TOKEN (loop protection). So
-# `gh release create` here would create the release but NOT kick
-# publish.yml — which cost us a manual delete+recreate on v0.3.0 before
-# this was fixed. Inlining means the chain is:
-#   PR merge → this workflow → tag+release+npm publish in one run.
+# Why dispatch rather than relying on publish.yml's `release: published`
+# trigger: GitHub intentionally doesn't fire other workflows for events
+# created by GITHUB_TOKEN (loop protection). So `gh release create` here
+# creates the release but does NOT kick publish.yml on its own — which
+# cost us a manual delete+recreate on v0.3.0 before this was understood.
+# workflow_dispatch events ARE allowed to chain, so:
+#   PR merge → this workflow → tag+release → dispatch publish.yml → npm.
 #
-# publish.yml stays in place for the *manual* release case (a maintainer
-# running `gh release create` locally does trigger publish.yml, since
-# that release event isn't from GITHUB_TOKEN).
+# publish.yml's `release: published` trigger stays in place for the
+# *manual* release case (a maintainer running `gh release create`
+# locally does fire it, since that event isn't from GITHUB_TOKEN).
 
 on:
   pull_request:
@@ -25,9 +27,10 @@ on:
 
 permissions:
   contents: write
-  # id-token: write required for `npm publish --provenance` (SLSA
-  # attestation). Without this, npm publish would fail or skip provenance.
-  id-token: write
+  # actions: write lets this run dispatch publish.yml for the tokenless
+  # npm publish. (id-token was needed here back when the publish was
+  # inline; it now lives in publish.yml where the OIDC exchange happens.)
+  actions: write
 
 jobs:
   release:
@@ -71,10 +74,15 @@ jobs:
 
       - name: Ensure tag doesn't already exist
         if: steps.ver.outputs.changed == 'true'
+        # Checked against the REMOTE: this checkout is shallow and
+        # actions/checkout doesn't fetch tags (fetch-tags defaults false),
+        # so the previous `git rev-parse "$TAG"` could never see an
+        # existing tag — the guard was a silent no-op and duplicate-tag
+        # protection was riding on `gh release create` erroring later.
         run: |
           TAG="v${{ steps.ver.outputs.version }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists — likely a previous run already released this version. Aborting to avoid tag-overwrite."
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists on origin — a previous run already released this version. Aborting to avoid tag-overwrite."
             exit 1
           fi
 
@@ -88,7 +96,6 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
       - name: npm ci
         if: steps.ver.outputs.changed == 'true'
@@ -140,20 +147,23 @@ jobs:
             echo ""
             echo "---"
             echo ""
-            echo "Built + tested + npm-published inline by \`auto-release.yml\` on this run. See the workflow log for the provenance-attested publish output."
+            echo "Built + tested by \`auto-release.yml\`; npm publish runs tokenless in \`publish.yml\` via OIDC trusted publishing (provenance-attested)."
           } > body.md
 
           gh release create "$TAG" --title "$TAG" --notes-file body.md
 
-      - name: npm publish
+      - name: Dispatch publish.yml (OIDC trusted publishing)
         if: steps.ver.outputs.changed == 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          gh workflow run publish.yml --ref master -f tag="$TAG"
+          echo "Dispatched publish.yml for $TAG — the npm publish happens there (tokenless)."
 
       - name: Post-release summary
         if: steps.ver.outputs.changed == 'true'
         run: |
           echo "✓ Released v${{ steps.ver.outputs.version }}"
           echo "✓ Triggered by PR #${{ github.event.pull_request.number }}"
-          echo "✓ Published to npm (with SLSA provenance)"
+          echo "✓ publish.yml dispatched — npm publish via OIDC trusted publishing"
