@@ -11,7 +11,11 @@
 import { withModel, type LLMConfig } from "./llm.js";
 import type { SearchAdapter, SearchResult, SubAdapterFailure } from "./search.js";
 import { dedupeByUrl, isRateLimitError } from "./search.js";
-import { rankByAuthority, type SourceAuthorityMode } from "./source-authority.js";
+import {
+  rankByAuthority,
+  selectWithHostCap,
+  type SourceAuthorityMode,
+} from "./source-authority.js";
 import { planQueries, critique, type Plan, type Critique } from "./plan.js";
 import { BrowserSession, type BrowserOptions, type FetchedPage } from "./browser.js";
 import { extractContent } from "./extract.js";
@@ -589,20 +593,37 @@ export async function runAgent(
       const candidatesFoundThisRound = allCandidates.length - candidatesBefore;
 
       const headroom = Math.max(0, config.maxSources - keptSources.length);
+      const authorityMode = config.sourceAuthority ?? "prefer";
       // #111 — rank this round's candidates by domain authority before the
       // slot-limited selection, so authoritative/primary sources win the
       // limited fetch slots ahead of whatever search ranked first. "prefer"
       // (default) only reorders; "strict" may drop known farms; "off" is a
       // no-op. candidatesFoundThisRound is left intact for the round trace.
+      // #148 — within equal authority tiers, break ties by topical overlap
+      // between the candidate's title+snippet and the question/round terms
+      // (the #145 token machinery): a uniform-tier pool (all-arxiv, or
+      // all-reputable multi results) otherwise fills the slots on
+      // search-interleave order, which is how a 2010 paper won a slot in a
+      // ternary-LLM answer set.
       const rankedCandidates = rankByAuthority(
         allCandidates.slice(candidatesBefore),
         (c) => c.url,
-        config.sourceAuthority ?? "prefer",
+        authorityMode,
+        { terms: relevanceTerms, textOf: (c) => `${c.title} ${c.snippet}` },
       );
-      const toFetch = rankedCandidates.slice(
-        0,
-        Math.min(headroom, rankedCandidates.length),
-      );
+      // #148 — slot diversity: at most 2 kept per registrable domain unless
+      // the cap would leave slots unfilled (the 4×wikipedia pattern —
+      // encyclopedic context is worth a slot or two, rarely four). Applied
+      // only when authority ranking is on, so "off" stays the untouched
+      // measurement baseline.
+      const toFetch =
+        authorityMode === "off"
+          ? rankedCandidates.slice(0, Math.min(headroom, rankedCandidates.length))
+          : selectWithHostCap(
+              rankedCandidates,
+              (c) => c.url,
+              Math.min(headroom, rankedCandidates.length),
+            );
 
       const fetched = await fetchMany(toFetch, config, ensureBrowser, signal);
 

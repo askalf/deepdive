@@ -9,6 +9,7 @@ import { dedupeKey } from "../url-util.js";
 import { isRateLimitError, SearchRateLimitError } from "../search.js";
 import type { SearchAdapter, SearchResult, SubAdapterFailure } from "../search.js";
 import { rankByAuthority, type SourceAuthorityMode } from "../source-authority.js";
+import { extractKeywords } from "../query-keywords.js";
 
 export class MultiSearch implements SearchAdapter {
   readonly name: string;
@@ -98,7 +99,10 @@ export class MultiSearch implements SearchAdapter {
       }
       throw new Error(`multi: every sub-adapter failed — ${failures.join(" · ")}`);
     }
-    return interleaveResults(lists, limit, this.authorityMode);
+    // #148 — the query's content tokens break authority ties in the merged
+    // pool, so a uniform-tier fan-out (e.g. wikipedia dominating a reputable
+    // pool) is ordered by topical fit rather than raw interleave order.
+    return interleaveResults(lists, limit, this.authorityMode, extractKeywords(query));
   }
 }
 
@@ -118,6 +122,9 @@ export function interleaveResults(
   lists: SearchResult[][],
   limit: number,
   authorityMode: SourceAuthorityMode = "off",
+  // #148 — optional query content tokens; when present (and biasing is on),
+  // equal-authority entries are ordered by title+snippet overlap with them.
+  relevanceTerms: readonly string[] = [],
 ): SearchResult[] {
   // When biasing is on, merge the whole deduped pool (cap = Infinity) so the
   // authority sort decides which entries win the limited slots rather than
@@ -140,6 +147,9 @@ export function interleaveResults(
   const ordered =
     authorityMode === "off"
       ? merged
-      : rankByAuthority(merged, (r) => r.url, authorityMode);
+      : rankByAuthority(merged, (r) => r.url, authorityMode, {
+          terms: relevanceTerms,
+          textOf: (r) => `${r.title} ${r.snippet}`,
+        });
   return ordered.slice(0, limit).map((r, i) => ({ ...r, rank: i + 1 }));
 }

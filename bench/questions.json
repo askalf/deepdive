@@ -1,5 +1,5 @@
 {
-  "$comment": "Golden questions for the quality bench (bench/run.mjs). One entry per cookbook shape. Structural expectations only — the bench checks that runs complete, ground themselves in enough sources, and survive citation verification; it does not judge prose. Keep questions stable across releases so scoreboards are comparable.",
+  "$comment": "Golden questions for the quality bench (bench/run.mjs). One entry per cookbook shape. Structural expectations only — the bench checks that runs complete, ground themselves in enough sources, and survive citation verification; it does not judge prose. Keep questions stable across releases so scoreboards are comparable. canonicalSource (#148): case-insensitive URL regex for the on-topic canonical source an expert would demand in the kept set — REPORTED as the board's canonical column, never gated.",
   "defaults": {
     "minSources": 4,
     "minSupportRatio": 0.5,
@@ -11,7 +11,8 @@
       "id": "factual-lookup",
       "shape": "single-pass factual",
       "question": "what are the current rate limits for the Claude API at each usage tier",
-      "expectKeywords": ["tier", "requests", "tokens"]
+      "expectKeywords": ["tier", "requests", "tokens"],
+      "canonicalSource": "docs\\.(anthropic|claude)\\.com"
     },
     {
       "id": "technical-deep",
@@ -19,7 +20,8 @@
       "question": "how does HTTP/3 connection migration work and what breaks it in practice",
       "args": ["--deep=1"],
       "expectKeywords": ["QUIC", "connection"],
-      "minSources": 5
+      "minSources": 5,
+      "canonicalSource": "rfc-editor\\.org|datatracker\\.ietf\\.org"
     },
     {
       "id": "academic",
@@ -27,13 +29,15 @@
       "question": "what does recent research say about retrieval-augmented generation reducing hallucinations",
       "args": ["--search=multi:duckduckgo,arxiv,openalex"],
       "expectKeywords": ["retrieval", "hallucination"],
-      "minSources": 5
+      "minSources": 5,
+      "canonicalSource": "arxiv\\.org|aclanthology\\.org"
     },
     {
       "id": "comparison",
       "shape": "trade-off comparison",
       "question": "SQLite vs PostgreSQL for a single-server web application: when does each win",
-      "expectKeywords": ["SQLite", "PostgreSQL"]
+      "expectKeywords": ["SQLite", "PostgreSQL"],
+      "canonicalSource": "sqlite\\.org|postgresql\\.org"
     },
     {
       "id": "recent",
@@ -51,7 +55,8 @@
       "args": ["--search=multi:duckduckgo,stackexchange"],
       "expectKeywords": ["proxy_buffer", "502"],
       "minSources": 3,
-      "minAnswerWords": 80
+      "minAnswerWords": 80,
+      "canonicalSource": "nginx\\.(org|com)"
     }
   ]
 }

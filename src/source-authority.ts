@@ -14,6 +14,8 @@
 // is not. The lists are deliberately small and auditable; the TLD + subdomain
 // rules cover the long tail without trying to enumerate the web.
 
+import { trimPunctuation } from "./query-keywords.js";
+
 export type AuthorityTier = "primary" | "reputable" | "unknown" | "low";
 
 export interface AuthorityScore {
@@ -166,6 +168,44 @@ export function summarizeSourceTrust(urls: string[]): SourceTrustSummary {
 
 export type SourceAuthorityMode = "prefer" | "strict" | "off";
 
+// #148 — optional within-tier relevance tiebreak for rankByAuthority.
+// Authority orders by WHO published; once a candidate pool is uniformly
+// trustworthy (all-arxiv, or all-reputable multi results) it stops
+// discriminating exactly where it is the only ranking axis left, and the
+// slot-limited keep stage fills on search-interleave order (live receipts:
+// a 2010 paper kept in a ternary-LLM answer set; wikipedia taking 4 of 7
+// slots on an ops question). `terms` are the question/round content tokens
+// (the #145 machinery); `textOf` yields the searchable text of an item
+// (title + snippet — content isn't fetched yet at ranking time).
+export interface RelevanceTiebreak<T> {
+  terms: readonly string[];
+  textOf: (item: T) => string;
+}
+
+function normalizeToken(w: string): string {
+  return trimPunctuation(w).toLowerCase();
+}
+
+/**
+ * #148 — how many of `terms` appear in `text`, on the same index-walk token
+ * normalization as the keyword ladder (#86) and relevance window (#145).
+ * Distinct-term count, not occurrence count: repeating one keyword shouldn't
+ * outrank matching three different ones. Pure; exported for tests.
+ */
+export function relevanceOverlap(text: string, terms: readonly string[]): number {
+  const termSet = new Set(terms.map(normalizeToken).filter((t) => t.length >= 2));
+  if (termSet.size === 0) return 0;
+  const tokens = new Set(
+    text
+      .split(/\s+/)
+      .map(normalizeToken)
+      .filter((t) => t.length > 0),
+  );
+  let n = 0;
+  for (const t of termSet) if (tokens.has(t)) n++;
+  return n;
+}
+
 /**
  * Order this round's candidate sources for the limited fetch slots by domain
  * authority, so authoritative/primary sources win the slots ahead of whatever
@@ -178,18 +218,92 @@ export type SourceAuthorityMode = "prefer" | "strict" | "off";
  *      UNLESS every candidate this round is low, in which case keep them. That
  *      min-keep floor means a niche or recency topic that only surfaces farms
  *      still gets sources rather than nothing.
- *   "off": identity — search order untouched.
+ *   "off": identity — search order untouched (relevance is ignored too — off
+ *      is the measurement baseline and stays a strict no-op).
+ *
+ * #148: when `relevance` is provided, candidates that tie on authority are
+ * ordered by topical overlap with the question/round terms, so a uniform-tier
+ * pool still discriminates by WHAT answers the question. Authority stays the
+ * primary key — relevance never promotes a lower tier above a higher one —
+ * and equal-overlap ties keep search order (stable sort), so pools where the
+ * tiers already discriminate behave exactly as before.
  */
 export function rankByAuthority<T>(
   items: T[],
   urlOf: (item: T) => string,
   mode: SourceAuthorityMode,
+  relevance?: RelevanceTiebreak<T>,
 ): T[] {
   if (mode === "off" || items.length <= 1) return items;
-  const scored = items.map((item) => ({ item, score: scoreAuthority(urlOf(item)) }));
+  const scored = items.map((item) => ({
+    item,
+    score: scoreAuthority(urlOf(item)),
+    overlap: relevance ? relevanceOverlap(relevance.textOf(item), relevance.terms) : 0,
+  }));
   const pool =
     mode === "strict" && scored.some((s) => s.score.tier !== "low")
       ? scored.filter((s) => s.score.tier !== "low")
       : scored;
-  return [...pool].sort((a, b) => b.score.score - a.score.score).map((s) => s.item);
+  return [...pool]
+    .sort((a, b) => b.score.score - a.score.score || b.overlap - a.overlap)
+    .map((s) => s.item);
+}
+
+// Second-level labels under which two-letter ccTLDs commonly register
+// (service.gov.uk, ox.ac.uk, example.co.jp) — an eTLD+1 approximation that
+// avoids shipping the public-suffix list. Wrong on exotic suffixes, which
+// costs at most a slightly-too-wide or too-narrow cap bucket, never a drop.
+const CC_SECOND_LEVEL = new Set(["ac", "co", "com", "edu", "gov", "net", "org"]);
+
+/**
+ * #148 — approximate registrable domain of a URL, for the per-host slot cap:
+ * en.wikipedia.org and de.wikipedia.org must count as ONE host or the cap is
+ * trivially evaded by language editions. Falls back to the raw input when the
+ * URL won't parse (such candidates just bucket together).
+ */
+export function registrableDomainOf(url: string): string {
+  const host = hostnameOf(url);
+  if (!host) return url;
+  const labels = host.split(".");
+  if (labels.length <= 2) return host;
+  const tld = labels[labels.length - 1];
+  const second = labels[labels.length - 2];
+  const take = tld.length === 2 && CC_SECOND_LEVEL.has(second) ? 3 : 2;
+  return labels.slice(-take).join(".");
+}
+
+/**
+ * #148 — pick up to `slots` items from an already-ranked list, keeping at
+ * most `cap` per registrable domain UNLESS there is headroom: when honoring
+ * the cap would leave slots unfilled, the best capped-out items fill them
+ * (encyclopedic context is worth a slot or two, rarely four — but four
+ * wikipedia results are still better than three sources and an empty slot).
+ * Preserves the input's ranking order in the output. Pure.
+ */
+export function selectWithHostCap<T>(
+  items: T[],
+  urlOf: (item: T) => string,
+  slots: number,
+  cap: number = 2,
+): T[] {
+  if (slots <= 0) return [];
+  const perHost = new Map<string, number>();
+  const chosen = new Set<number>();
+  const overflow: number[] = [];
+  for (let i = 0; i < items.length && chosen.size < slots; i++) {
+    const host = registrableDomainOf(urlOf(items[i]));
+    const count = perHost.get(host) ?? 0;
+    if (count >= cap) {
+      overflow.push(i);
+      continue;
+    }
+    perHost.set(host, count + 1);
+    chosen.add(i);
+  }
+  // Headroom: slots the cap left empty go to the best capped-out candidates.
+  for (const i of overflow) {
+    if (chosen.size >= slots) break;
+    chosen.add(i);
+  }
+  return [...chosen].sort((a, b) => a - b).map((i) => items[i]);
 }

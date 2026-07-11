@@ -315,3 +315,36 @@ test("MultiSearch: default (no mode) leaves plain round-robin order", async () =
     ["https://gpt0x.com/1", "https://aiflashreport.com/3", "https://arxiv.org/abs/2"],
   );
 });
+
+// ── #148: relevance tiebreak in the fan-out merge ────────────────────────────
+
+test("interleaveResults: query terms break ties inside a uniform tier", () => {
+  const entry = (url, title, snippet) => ({ url, title, snippet, rank: 1 });
+  // Both reputable (wikipedia) — authority alone can't order them, so the
+  // interleave position used to decide. The on-topic entry must win the slot.
+  const lists = [[
+    entry("https://en.wikipedia.org/wiki/Coffee", "Coffee", "beans, brewing, caffeine"),
+    entry("https://en.wikipedia.org/wiki/Nginx", "Nginx", "nginx reverse proxy web server"),
+  ]];
+  const out = interleaveResults(lists, 2, "prefer", ["nginx", "proxy", "502"]);
+  assert.deepEqual(out.map((x) => x.url), [
+    "https://en.wikipedia.org/wiki/Nginx",
+    "https://en.wikipedia.org/wiki/Coffee",
+  ]);
+});
+
+test("interleaveResults: relevance never reorders across tiers, off ignores it", () => {
+  const entry = (url, title, snippet) => ({ url, title, snippet, rank: 1 });
+  const lists = [[
+    entry("https://example.com/great-match", "nginx proxy 502", "nginx proxy 502"),
+    entry("https://nginx.org/docs", "Module docs", "configuration directives"),
+  ]];
+  const preferred = interleaveResults(lists, 2, "prefer", ["nginx", "proxy", "502"]);
+  // primary (nginx.org) still first despite the unknown domain's full overlap
+  assert.equal(preferred[0].url, "https://nginx.org/docs");
+  const off = interleaveResults(lists, 2, "off", ["nginx", "proxy", "502"]);
+  assert.deepEqual(off.map((x) => x.url), [
+    "https://example.com/great-match",
+    "https://nginx.org/docs",
+  ]);
+});
