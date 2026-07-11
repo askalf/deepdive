@@ -77,6 +77,8 @@ const USAGE = `deepdive — local research agent
 Usage:
   deepdive "<question>" [flags]            Run the research agent
   deepdive doctor [flags]                  Health check — paste the output when filing issues
+  deepdive mcp                             MCP server on stdio — exposes deepdive_research
+                                           to MCP clients (Claude Code, agent harnesses)
   deepdive sessions ls [<filter>]          List saved sessions (optional question substring;
                                            --tag=<t> filters by tag)
   deepdive sessions tag <id> <tags>        Add comma-separated tags to a saved session
@@ -781,6 +783,14 @@ async function main(argv: string[]): Promise<number> {
   if (cfgErr) {
     process.stderr.write(`deepdive: ${cfgErr}\n`);
     return 2;
+  }
+  // MCP server mode — stdout becomes the protocol channel from here on, so
+  // this dispatch must run before anything that could print. Resolves (and
+  // exits 0) when the client disconnects.
+  if (parsed.question === "mcp") {
+    const { startMcpStdio } = await import("./mcp.js");
+    await startMcpStdio(await readDeepdiveVersion());
+    return 0;
   }
   if (parsed.question === "doctor") {
     const config = resolveConfig(parsed.flags, process.env);

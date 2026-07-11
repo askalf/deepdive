@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — MCP server mode: `deepdive mcp` (#160)
+
+deepdive now meets agents where they live. `deepdive mcp` runs a Model Context Protocol server on stdio exposing one tool, `deepdive_research`, so any MCP client (Claude Code, MCP-aware IDEs, agent harnesses) can hand its model a research tool that shows its work: every answer returns as markdown followed by the trust signals the CLI reports — source-trust mix, citations supported, confidence grade, and LLM cost. Nothing else in the MCP tool ecosystem reports the credibility of its own sources.
+
+Design points, in the fleet's proven MCP shape: configuration flows through the same `resolveConfig` path as CLI flags (the client's `env` block supplies defaults; per-call arguments override), so the two surfaces cannot drift. Calls are stateless (sessions off) and each run carries a wall-clock cap (default 10m) enforced by `AbortSignal.timeout` — a server must never `process.exit` the way the CLI's runtime backstop does. stdout is protocol-only; sparse progress goes to stderr. A failed run returns honest tool output rather than a protocol error — `NoSourcesError` carries the #147 diagnostics (what the domain filter dropped, which fallback was skipped and why) so the calling model can widen the filter or rephrase instead of guessing.
+
+New runtime dependencies (justified): `@modelcontextprotocol/sdk` — an MCP server cannot exist without the protocol implementation — and `zod`, the SDK's required schema layer. Both are regular dependencies so CI's `--omit=optional` installs keep the MCP tests importable.
+
+Pinned by `test/mcp.test.mjs`: protocol-level tests over the SDK's in-memory transport pair with an injected research runner (no network, LLM, or browser), the tool-argument → CLI-flag mapping, the stats footer, schema-layer rejection of missing arguments, error-path rendering — plus a real-stdio smoke test spawning `deepdive mcp` to prove stdout stays a clean protocol channel end-to-end.
+
 ## [0.30.0] - 2026-07-11
 
 ### Changed — the allow-domain hint becomes a directive, not a suggestion (#157)
