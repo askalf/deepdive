@@ -258,6 +258,40 @@ This is the kind of thing hosted research tools cannot do — your notes don't l
 
 ---
 
+## MCP server — give your agent a researcher that shows its work
+
+`deepdive mcp` runs an MCP (Model Context Protocol) server on stdio, exposing one tool: `deepdive_research`. Any MCP client — Claude Code, MCP-aware IDEs, other agent harnesses — can hand its model a research tool whose every answer arrives with the trust signals attached: the source-trust mix (primary/reputable/unknown/low), how many citations survived lexical verification, a confidence grade, and the exact LLM cost.
+
+Claude Code registration:
+
+```
+claude mcp add deepdive -- npx -y @askalf/deepdive mcp
+```
+
+Or in an `mcpServers` config block:
+
+```
+{
+  "mcpServers": {
+    "deepdive": {
+      "command": "npx",
+      "args": ["-y", "@askalf/deepdive", "mcp"],
+      "env": {
+        "DEEPDIVE_API_KEY": "...",
+        "DEEPDIVE_BASE_URL": "http://localhost:3456",
+        "DEEPDIVE_SEARCH": "multi:duckduckgo,wikipedia"
+      }
+    }
+  }
+}
+```
+
+Configuration flows exactly like the CLI: the `env` block supplies defaults (endpoint, key, search backends), and per-call tool arguments override — `search`, `allow_domains` / `deny_domains`, `since`, `deep`, `max_cost_usd`, `max_sources`, `source_authority`, `max_runtime`. Calls are stateless (no sessions) and each run carries a wall-clock cap (default 10m). Research runs take one to several minutes — configure your client's tool timeout accordingly. Progress lines go to stderr, so a client that surfaces server stderr shows the run moving; stdout stays a clean protocol channel.
+
+A failed run comes back as honest tool output, not a protocol error — the same diagnostics the CLI prints on exit 3 (what was searched, what the domain filter dropped, which fallback was skipped and why), so the calling model can decide to widen the filter or rephrase instead of guessing.
+
+---
+
 ## Remote browser (CDP)
 
 By default deepdive launches a local headless Chromium via Playwright, which means a first install needs the browser binaries (`npx playwright install`). To skip that and attach to an existing browser instead, point deepdive at a CDP endpoint:
