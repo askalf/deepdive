@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-07-11
+
 ### Added — MCP server mode: `deepdive mcp` (#160)
 
 deepdive now meets agents where they live. `deepdive mcp` runs a Model Context Protocol server on stdio exposing one tool, `deepdive_research`, so any MCP client (Claude Code, MCP-aware IDEs, agent harnesses) can hand its model a research tool that shows its work: every answer returns as markdown followed by the trust signals the CLI reports — source-trust mix, citations supported, confidence grade, and LLM cost. Nothing else in the MCP tool ecosystem reports the credibility of its own sources.
