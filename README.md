@@ -47,6 +47,12 @@ The cost-arbitrage argument is: the deep-research workload is *exactly* the shap
 
 ---
 
+## The nightly report card
+
+Every night at 04:23 UTC, five fixed research questions — one per failure axis found while live-testing the deployed agent — run through a production deepdive runner. Each run's source-trust mix, citation-verification support, confidence, and cost land in a ledger that publishes automatically to this repo's [`canary-data` branch](https://github.com/askalf/deepdive/tree/canary-data) and charts live at **[sprayberrylabs.com/deepdive-canary](https://sprayberrylabs.com/deepdive-canary)** — including the nights that fail. A receipt that can't fail is a press release; that page is where these ones would fail in public.
+
+---
+
 ## 60 seconds
 
 ```bash
