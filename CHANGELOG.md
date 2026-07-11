@@ -16,6 +16,16 @@ Live receipt on v0.27.1: the same question with `--allow-domain=nvlpubs.nist.gov
 
 Pinned by `test/agent-allow-domain.test.mjs` (fake-adapter reproductions of all three behaviors, including the deny-only and open-web-fallback non-triggers) plus `canServeAllowedDomain` cases in `test/domain-filter.test.mjs` and `servesDomains` union cases in `test/multi-search.test.mjs`.
 
+### Changed — authority ranking learns to see topical relevance in uniform-tier pools (#148)
+
+Two live receipts from the same night, one gap: `rankByAuthority` orders by WHO published, and once a candidate pool is uniformly trustworthy it stops discriminating exactly where it is the only ranking axis left — the slot-limited keep stage then fills on search-interleave order. An `--search=arxiv` run kept a December **2010** paper (all 10 candidates `primary`, nothing to break the tie) in a ternary-LLM answer set; a `multi:` ops run gave wikipedia **4 of 7** slots (all `reputable`, same story). Three additive pieces, measured per the #97 lesson:
+
+- **Relevance tiebreak inside equal authority tiers.** `rankByAuthority` accepts an optional `{terms, textOf}` tiebreak: candidates tying on authority are ordered by distinct-term overlap between their title+snippet and the question/round content tokens — the same deterministic index-walk token machinery as #86/#131/#145. Authority stays the primary key (relevance never promotes a lower tier), equal-overlap ties keep search order (stable sort), and `off` remains a strict no-op — pools whose tiers already discriminate behave exactly as before. Threaded at BOTH ranking sites: the keep stage (agent.ts, reusing the #145 `relevanceTerms`) and the `multi:` fan-out merge (per-query keywords).
+- **Per-registrable-domain slot cap at the keep stage.** At most 2 kept per registrable domain per round (en./de.wikipedia.org count as one host) — UNLESS honoring the cap would leave slots unfilled, in which case the best capped-out candidates take them. Encyclopedic context is worth a slot or two, rarely four. Applied only when authority ranking is on, so `off` stays the untouched measurement baseline.
+- **The bench grows a `canonical` column (the #148 measurement instrument).** Authority boards measure trust composition, not topical fit — an all-primary kept set can still miss the one source that answers. Questions now declare `canonicalSource` (a URL regex for the source an expert would demand: nginx.org for the nginx question, an RFC for HTTP/3); both scoreboards report ✓/✗ per run. Reported, never gated, same stance as authority.
+
+Pinned by new cases in `test/source-authority.test.mjs` (tiebreak inside/across tiers, stability, off-mode no-op, registrable-domain collapsing, cap-with-headroom), `test/multi-search.test.mjs` (fan-out tiebreak), and `test/bench-authority.test.mjs` (canonical column). Receipted on the branch build (`bench/results/2026-07-11-pr155-*.md`, off→prefer with the canonical column): academic 8P 3U → **11P 0U**, niche-ops 2P 2R 4U → **6P 5R 1U**, canonical ✓ on all four runs, aggregate primary/reputable share 73%→100% and 50%→92%.
+
 ## [0.28.0] - 2026-07-02
 
 ### Changed — the per-source word cap now spends its budget on query-relevant spans, not the document head (#145)

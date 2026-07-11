@@ -122,7 +122,7 @@ export function renderScoreboard(rows, meta) {
   const backend = meta.searchBackend ? ` · search: \`${meta.searchBackend}\`` : "";
   lines.push(`model: \`${meta.model}\` · base-url: \`${meta.baseUrl}\`${backend} · deepdive v${meta.version}`);
   lines.push("");
-  const header = ["question", ...GATES.map(([, label]) => label), "authority", "verdict", "time"];
+  const header = ["question", ...GATES.map(([, label]) => label), "authority", "canonical", "verdict", "time"];
   lines.push(`| ${header.join(" | ")} |`);
   lines.push(`|${header.map(() => "---").join("|")}|`);
   for (const row of rows) {
@@ -132,6 +132,7 @@ export function renderScoreboard(rows, meta) {
       cells.push(`${g.pass ? "✅" : "❌"} ${g.detail}`);
     }
     cells.push(fmtAuthority(row.authority));
+    cells.push(fmtCanonical(row.canonical));
     cells.push(row.score.pass ? "**PASS**" : "**FAIL**");
     cells.push(`${(row.durationMs / 1000).toFixed(0)}s`);
     lines.push(`| ${cells.join(" | ")} |`);
@@ -202,6 +203,42 @@ export function trustedShare(dist) {
   return dist.total > 0 ? (dist.primary + dist.reputable) / dist.total : 0;
 }
 
+// ── canonical-source spot-check (#148) ───────────────────────────────────────
+// The authority boards measure trust COMPOSITION, not topical fit — a kept set
+// can be all-primary and still miss the one source that actually answers the
+// question (live receipt: an all-primary arxiv pool kept a 2010 paper in a
+// ternary-LLM answer set). Questions may declare `canonicalSource`, a
+// case-insensitive regex for the URL of the source a subject-matter expert
+// would demand in the kept set (nginx.org for the nginx question, an RFC for
+// HTTP/3). REPORTED, never gated — same stance as authority: a run can answer
+// well from mirrors and secondary write-ups.
+
+// Returns null when the question declares no pattern OR the run produced no
+// envelope (column renders "—" — "run failed" must not read as "ran and
+// missed"), else { present, matched } with the first kept URL that hit.
+export function canonicalOf(json, pattern) {
+  if (!pattern || !json) return null;
+  const re = new RegExp(pattern, "i");
+  const urls = Array.isArray(json?.sources)
+    ? json.sources.map((s) => s?.url ?? "")
+    : [];
+  const matched = urls.find((u) => re.test(u)) ?? null;
+  return { present: matched !== null, matched };
+}
+
+// Compact board cell: "✓ nginx.org", "✗", or "—" (no pattern declared).
+export function fmtCanonical(c) {
+  if (!c) return "—";
+  if (!c.present) return "✗";
+  let host = c.matched;
+  try {
+    host = new URL(c.matched).hostname.replace(/^www\./, "");
+  } catch {
+    /* keep the raw match */
+  }
+  return `✓ ${host}`;
+}
+
 // Compact board cell: "3P 0R 1U 0L · high", or "—" when there's nothing to show.
 export function fmtAuthority(dist) {
   if (!dist || dist.total === 0) return "—";
@@ -235,16 +272,21 @@ export function renderComparison(pairs, meta) {
   lines.push(
     "`--source-authority`: **off** (raw search order) → **prefer** " +
       "(default — authoritative sources win the limited fetch slots). " +
-      "Cells: primary/reputable/unknown/low · trust. Informational, not gated.",
+      "Cells: primary/reputable/unknown/low · trust. Informational, not gated. " +
+      "`canonical` (#148): did the kept set contain the question's declared " +
+      "canonical source? ✓/✗, — when the question declares none.",
   );
   lines.push("");
-  const header = ["question", "off", "prefer", "Δ prim+rep"];
+  const header = ["question", "off", "prefer", "Δ prim+rep", "canonical off→prefer"];
   lines.push(`| ${header.join(" | ")} |`);
   lines.push(`|${header.map(() => "---").join("|")}|`);
+  const mark = (c) => (c === null || c === undefined ? "—" : c.present ? "✓" : "✗");
   for (const p of pairs) {
     const delta = p.prefer.primary + p.prefer.reputable - (p.off.primary + p.off.reputable);
     const sign = delta > 0 ? `+${delta}` : `${delta}`;
-    lines.push(`| ${p.id} | ${fmtAuthority(p.off)} | ${fmtAuthority(p.prefer)} | ${sign} |`);
+    lines.push(
+      `| ${p.id} | ${fmtAuthority(p.off)} | ${fmtAuthority(p.prefer)} | ${sign} | ${mark(p.canonicalOff)}→${mark(p.canonicalPrefer)} |`,
+    );
   }
   const offAgg = aggregateAuthority(pairs.map((p) => p.off));
   const prefAgg = aggregateAuthority(pairs.map((p) => p.prefer));
@@ -377,7 +419,13 @@ async function main() {
       const preferRun = await runOne(questionArgs(q, web, "prefer"));
       const off = authorityOf(offRun.json);
       const prefer = authorityOf(preferRun.json);
-      pairs.push({ id: q.id, off, prefer });
+      pairs.push({
+        id: q.id,
+        off,
+        prefer,
+        canonicalOff: canonicalOf(offRun.json, q.canonicalSource),
+        canonicalPrefer: canonicalOf(preferRun.json, q.canonicalSource),
+      });
       console.error(`bench: ${q.id} → off ${fmtAuthority(off)} | prefer ${fmtAuthority(prefer)}`);
       // A failed run renders as "—" in the board; without this the log holds
       // no trace of WHY (a mid-board searxng/LLM degradation looks identical
@@ -406,7 +454,13 @@ async function main() {
     const outcome = await runOne(questionArgs(q, web));
     const spec = effectiveSpec(q, file.defaults);
     const score = scoreResult(outcome, spec);
-    rows.push({ id: q.id, score, durationMs: outcome.durationMs, authority: authorityOf(outcome.json) });
+    rows.push({
+      id: q.id,
+      score,
+      durationMs: outcome.durationMs,
+      authority: authorityOf(outcome.json),
+      canonical: canonicalOf(outcome.json, q.canonicalSource),
+    });
     const verdict = score.pass ? "PASS" : "FAIL";
     console.error(`bench: ${q.id} → ${verdict} (${(outcome.durationMs / 1000).toFixed(0)}s)`);
     if (!score.pass) {

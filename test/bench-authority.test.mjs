@@ -9,6 +9,8 @@ import {
   trustedShare,
   fmtAuthority,
   aggregateAuthority,
+  canonicalOf,
+  fmtCanonical,
   renderComparison,
   renderScoreboard,
   questionArgs,
@@ -116,6 +118,67 @@ test("renderScoreboard: omits the authority aggregate when no row carries a dist
   const out = renderScoreboard(rows, { date: "2026-06-18", model: "m", baseUrl: "u", version: "0.26.0" });
   assert.doesNotMatch(out, /Source authority:/);
   assert.match(out, /\| q \|.*\| — \|/); // empty cell still renders
+});
+
+// ── canonical-source spot-check (#148) ───────────────────────────────────────
+
+test("canonicalOf: null without a pattern; present/matched against kept URLs", () => {
+  const json = {
+    sources: [
+      { url: "https://en.wikipedia.org/wiki/Nginx" },
+      { url: "https://nginx.org/en/docs/http/ngx_http_proxy_module.html" },
+    ],
+  };
+  assert.equal(canonicalOf(json, undefined), null);
+  const hit = canonicalOf(json, "nginx\\.(org|com)");
+  assert.equal(hit.present, true);
+  assert.match(hit.matched, /nginx\.org/);
+  const miss = canonicalOf(json, "rfc-editor\\.org");
+  assert.deepEqual(miss, { present: false, matched: null });
+});
+
+test("canonicalOf: failed run (no envelope) reports — even with a pattern", () => {
+  // "run failed" must not read as "ran and missed the canonical source".
+  assert.equal(canonicalOf(null, "nginx\\.org"), null);
+});
+
+test("fmtCanonical: —, ✗, and ✓ with the matched hostname", () => {
+  assert.equal(fmtCanonical(null), "—");
+  assert.equal(fmtCanonical({ present: false, matched: null }), "✗");
+  assert.equal(
+    fmtCanonical({ present: true, matched: "https://www.nginx.org/en/docs/" }),
+    "✓ nginx.org",
+  );
+});
+
+test("renderScoreboard + renderComparison carry the canonical column", () => {
+  const spec = effectiveSpec({ expectKeywords: [] }, {
+    minSources: 1, minSupportRatio: 0, minAnswerWords: 0, maxCostUsd: 9,
+  });
+  const outcome = {
+    exitCode: 0,
+    json: { answer: "a b c", usage: { kept: 1, citationsTotal: 1, citationsSupported: 1, estimatedCostUsd: 0 } },
+  };
+  const rows = [{
+    id: "q",
+    score: scoreResult(outcome, spec),
+    durationMs: 1000,
+    canonical: { present: true, matched: "https://nginx.org/docs" },
+  }];
+  const board = renderScoreboard(rows, { date: "2026-07-11", model: "m", baseUrl: "u", version: "0.29.0" });
+  assert.match(board, /\| canonical \|/);
+  assert.match(board, /✓ nginx\.org/);
+
+  const pairs = [{
+    id: "q",
+    off: { primary: 0, reputable: 1, unknown: 0, low: 0, total: 1, label: "high" },
+    prefer: { primary: 0, reputable: 1, unknown: 0, low: 0, total: 1, label: "high" },
+    canonicalOff: { present: false, matched: null },
+    canonicalPrefer: { present: true, matched: "https://nginx.org/docs" },
+  }];
+  const cmp = renderComparison(pairs, { date: "2026-07-11", model: "m", baseUrl: "u", version: "0.29.0" });
+  assert.match(cmp, /canonical off→prefer/);
+  assert.match(cmp, /✗→✓/);
 });
 
 test("questionArgs: appends --source-authority only when a mode is given", () => {

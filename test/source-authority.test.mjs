@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scoreAuthority, summarizeSourceTrust, rankByAuthority } from "../dist/source-authority.js";
+import {
+  scoreAuthority,
+  summarizeSourceTrust,
+  rankByAuthority,
+  relevanceOverlap,
+  registrableDomainOf,
+  selectWithHostCap,
+} from "../dist/source-authority.js";
 
 const tierOf = (url) => scoreAuthority(url).tier;
 
@@ -194,4 +201,122 @@ test("rankByAuthority strict: keeps low-tier when nothing better (min-keep floor
 test("rankByAuthority off: preserves search order exactly", () => {
   const urls = ["https://aiflashreport.com/a", "https://redis.io/b", "https://example.com/c"];
   assert.deepEqual(rankByAuthority(urls, id, "off"), urls);
+});
+
+// ── #148: relevance tiebreak, registrable-domain cap ─────────────────────────
+
+test("relevanceOverlap: distinct-term count on normalized tokens", () => {
+  assert.equal(
+    relevanceOverlap("BitNet: 1.58-bit Ternary LLMs at scale", ["BitNet", "ternary", "FP16"]),
+    2,
+  );
+  // repetition doesn't inflate the count
+  assert.equal(relevanceOverlap("ternary ternary ternary", ["ternary", "BitNet"]), 1);
+  // punctuation-trimmed, case-insensitive, single-char terms ignored
+  assert.equal(relevanceOverlap("(Ternary!) systems", ["ternary", "a"]), 1);
+  assert.equal(relevanceOverlap("anything", []), 0);
+});
+
+test("rankByAuthority prefer: relevance breaks ties INSIDE a uniform tier", () => {
+  // The #148 receipt shape: an all-primary arxiv pool where interleave order
+  // put the off-topic paper first.
+  const items = [
+    { url: "https://arxiv.org/abs/1012.0392", text: "On ternary something from 2010" },
+    { url: "https://arxiv.org/abs/2402.17764", text: "BitNet b1.58: ternary LLMs match FP16 accuracy" },
+  ];
+  const ranked = rankByAuthority(items, (i) => i.url, "prefer", {
+    terms: ["BitNet", "ternary", "LLMs", "FP16", "accuracy"],
+    textOf: (i) => i.text,
+  });
+  assert.equal(ranked[0].url, "https://arxiv.org/abs/2402.17764");
+});
+
+test("rankByAuthority prefer: relevance never promotes a lower tier over a higher one", () => {
+  const items = [
+    { url: "https://example.com/perfect-match", text: "BitNet ternary FP16 accuracy trade-offs" },
+    { url: "https://arxiv.org/abs/1012.0392", text: "unrelated paper" },
+  ];
+  const ranked = rankByAuthority(items, (i) => i.url, "prefer", {
+    terms: ["BitNet", "ternary", "FP16"],
+    textOf: (i) => i.text,
+  });
+  // primary (arxiv) still outranks the unknown domain despite zero overlap
+  assert.equal(ranked[0].url, "https://arxiv.org/abs/1012.0392");
+});
+
+test("rankByAuthority prefer: equal overlap keeps search order (stable)", () => {
+  const items = [
+    { url: "https://arxiv.org/abs/1", text: "ternary systems" },
+    { url: "https://arxiv.org/abs/2", text: "ternary networks" },
+  ];
+  const ranked = rankByAuthority(items, (i) => i.url, "prefer", {
+    terms: ["ternary"],
+    textOf: (i) => i.text,
+  });
+  assert.deepEqual(ranked.map((i) => i.url), ["https://arxiv.org/abs/1", "https://arxiv.org/abs/2"]);
+});
+
+test("rankByAuthority off: stays a strict no-op even with relevance provided", () => {
+  const items = [
+    { url: "https://example.com/a", text: "no match" },
+    { url: "https://arxiv.org/abs/2", text: "ternary" },
+  ];
+  const ranked = rankByAuthority(items, (i) => i.url, "off", {
+    terms: ["ternary"],
+    textOf: (i) => i.text,
+  });
+  assert.deepEqual(ranked, items);
+});
+
+test("registrableDomainOf: collapses subdomains, keeps ccTLD second levels", () => {
+  assert.equal(registrableDomainOf("https://en.wikipedia.org/wiki/X"), "wikipedia.org");
+  assert.equal(registrableDomainOf("https://de.wikipedia.org/wiki/X"), "wikipedia.org");
+  assert.equal(registrableDomainOf("https://nginx.org/docs"), "nginx.org");
+  assert.equal(registrableDomainOf("https://www.service.gov.uk/x"), "service.gov.uk");
+  assert.equal(registrableDomainOf("https://research.ox.ac.uk/x"), "ox.ac.uk");
+  assert.equal(registrableDomainOf("not a url"), "not a url");
+});
+
+test("selectWithHostCap: caps a dominating host at 2 when slots are contested", () => {
+  // The 4×wikipedia receipt: four encyclopedic results outranking the
+  // specific how-to content in a 5-slot round.
+  const urls = [
+    "https://en.wikipedia.org/wiki/A",
+    "https://en.wikipedia.org/wiki/B",
+    "https://de.wikipedia.org/wiki/C", // same registrable domain as A/B
+    "https://en.wikipedia.org/wiki/D",
+    "https://serverfault.com/q/1",
+    "https://nginx.org/docs",
+    "https://stackoverflow.com/q/2",
+  ];
+  const picked = selectWithHostCap(urls, (u) => u, 5);
+  assert.deepEqual(picked, [
+    "https://en.wikipedia.org/wiki/A",
+    "https://en.wikipedia.org/wiki/B",
+    "https://serverfault.com/q/1",
+    "https://nginx.org/docs",
+    "https://stackoverflow.com/q/2",
+  ]);
+});
+
+test("selectWithHostCap: headroom lets capped-out items fill unfilled slots", () => {
+  const urls = [
+    "https://en.wikipedia.org/wiki/A",
+    "https://en.wikipedia.org/wiki/B",
+    "https://en.wikipedia.org/wiki/C",
+    "https://nginx.org/docs",
+  ];
+  // 4 slots, only 4 candidates — honoring the cap would return 3 and waste a
+  // slot; the best capped-out item takes it instead (in rank order).
+  assert.deepEqual(selectWithHostCap(urls, (u) => u, 4), urls);
+});
+
+test("selectWithHostCap: respects slots and preserves ranking order", () => {
+  const urls = [
+    "https://a.com/1",
+    "https://b.com/2",
+    "https://c.com/3",
+  ];
+  assert.deepEqual(selectWithHostCap(urls, (u) => u, 2), ["https://a.com/1", "https://b.com/2"]);
+  assert.deepEqual(selectWithHostCap(urls, (u) => u, 0), []);
 });
