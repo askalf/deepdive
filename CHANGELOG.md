@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed — `--allow-domain` is no longer a coin flip (#147)
+
+Live receipt on v0.27.1: the same question with `--allow-domain=nvlpubs.nist.gov` run three times gave one full answer and two `exit 3`s — while a raw search probe carrying the host name found the target PDF at rank 1 throughout. Two compounding causes, both fixed:
+
+- **Retry-with-hint on the empty-post-filter path.** The planner (correctly) rewrites the question into semantic sub-queries and drops incidental hints like a host name — so whether any query happened to surface the allowed domain was planner-variance roulette, and the filter then dropped everything else. Now, when a round yields zero candidates under an allow list, the agent re-runs the round's queries once with the allowed host(s) appended as a relevance hint (most engines treat a bare host token as a strong signal; the filter stays the enforcement layer). Same shape as the #86/#131 keyword ladder: one extra pass, only on the would-have-failed path, and suppressed when the primary is rate-limiting. Surfaced as a `search.hinted` event, visible without `--verbose`.
+- **The structurally useless fallback pass is skipped, and says so.** With zero candidates post-filter, the recovery pass ran the fallback adapters (default `wikipedia`) — whose results were then all dropped by the same domain filter, burning keyless calls on a guaranteed-empty outcome. Fixed-domain adapters (wikipedia, arxiv, pubmed, github — and `multi:` when every sub-adapter declares) now expose `servesDomains`; when that serving set can't overlap the allow list in either hostname-suffix direction, the fallback is skipped with a `search.fallback-skipped` event and the no-sources message names it.
+- **The exit-3 message stops lying.** "returned 0 usable results" was wrong when search returned plenty and the filter ate them all — `NoSourcesError` now carries `droppedByDomainFilter` and `fallbackSkipped`, and the CLI renders "found N result(s), but the domain filter dropped every one" with filter-specific advice instead of "rephrase the question".
+
+Pinned by `test/agent-allow-domain.test.mjs` (fake-adapter reproductions of all three behaviors, including the deny-only and open-web-fallback non-triggers) plus `canServeAllowedDomain` cases in `test/domain-filter.test.mjs` and `servesDomains` union cases in `test/multi-search.test.mjs`.
+
 ## [0.28.0] - 2026-07-02
 
 ### Changed — the per-source word cap now spends its budget on query-relevant spans, not the document head (#145)

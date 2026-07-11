@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  canServeAllowedDomain,
   classifyUrl,
   matchesAny,
   normalizePattern,
@@ -93,5 +94,45 @@ test("parseDomainList: trims and drops empty parts", () => {
   assert.deepEqual(
     parseDomainList(" github.com , pinterest.com ,, "),
     ["github.com", "pinterest.com"],
+  );
+});
+
+// ── canServeAllowedDomain (#147) ────────────────────────────────────────────
+
+test("canServeAllowedDomain: empty allow list matches everything", () => {
+  assert.equal(canServeAllowedDomain(["wikipedia.org"], []), true);
+});
+
+test("canServeAllowedDomain: exact and either-direction suffix overlap", () => {
+  // serving domain equals the allow pattern
+  assert.equal(canServeAllowedDomain(["wikipedia.org"], ["wikipedia.org"]), true);
+  // allow pattern is a host UNDER the serving domain (en.wikipedia.org URLs pass)
+  assert.equal(canServeAllowedDomain(["wikipedia.org"], ["en.wikipedia.org"]), true);
+  // serving domain is UNDER the allow pattern (pubmed.ncbi… passes allow=ncbi…)
+  assert.equal(
+    canServeAllowedDomain(["pubmed.ncbi.nlm.nih.gov"], ["ncbi.nlm.nih.gov"]),
+    true,
+  );
+});
+
+test("canServeAllowedDomain: disjoint sets cannot serve", () => {
+  assert.equal(canServeAllowedDomain(["wikipedia.org"], ["nvlpubs.nist.gov"]), false);
+  // suffix match must be dot-separated — no substring false positives
+  assert.equal(canServeAllowedDomain(["github.com"], ["hub.com"]), false);
+});
+
+test("canServeAllowedDomain: normalizes patterns on both sides", () => {
+  assert.equal(canServeAllowedDomain(["WIKIPEDIA.ORG"], [".wikipedia.org"]), true);
+  assert.equal(canServeAllowedDomain(["wikipedia.org"], ["www.wikipedia.org"]), true);
+});
+
+test("canServeAllowedDomain: any one serving domain overlapping is enough", () => {
+  assert.equal(
+    canServeAllowedDomain(["wikipedia.org", "arxiv.org"], ["arxiv.org"]),
+    true,
+  );
+  assert.equal(
+    canServeAllowedDomain(["wikipedia.org", "arxiv.org"], ["nist.gov"]),
+    false,
   );
 });

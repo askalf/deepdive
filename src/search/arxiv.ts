@@ -14,6 +14,8 @@ import { decodeHtmlEntities } from "./duckduckgo.js";
 
 export class ArxivSearch implements SearchAdapter {
   readonly name = "arxiv";
+  // Results are arxiv.org abstract-page URLs (the Atom <id>) — #147.
+  readonly servesDomains = ["arxiv.org"];
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
     const url = new URL("https://export.arxiv.org/api/query");

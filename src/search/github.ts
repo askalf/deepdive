@@ -15,6 +15,8 @@ interface GitHubRepoItem {
 
 export class GitHubSearch implements SearchAdapter {
   readonly name = "github";
+  // Repository search returns github.com html_url pages only — #147.
+  readonly servesDomains = ["github.com"];
   constructor(private readonly token?: string) {}
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {

@@ -18,6 +18,8 @@ interface ESummaryDoc {
 
 export class PubMedSearch implements SearchAdapter {
   readonly name = "pubmed";
+  // Results are constructed pubmed.ncbi.nlm.nih.gov/<id>/ URLs — #147.
+  readonly servesDomains = ["pubmed.ncbi.nlm.nih.gov"];
 
   async search(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
     const n = Math.min(Math.max(limit, 1), 50);

@@ -171,6 +171,8 @@ Flags:
   --pdf-max-pages=<n>           Cap pages parsed per PDF. Default: 50
   --allow-domain=<list>         Comma-separated hostname suffixes to keep
                                 exclusively (e.g. github.com,docs.anthropic.com).
+                                A round whose results all fail the list is
+                                retried once with the host(s) as a search hint.
   --deny-domain=<list>          Comma-separated hostname suffixes to drop
                                 (e.g. pinterest.com,quora.com).
   --since=<date|duration>       Drop sources published before this — an absolute
@@ -568,6 +570,10 @@ function renderEvent(e: AgentEvent): string {
       }`;
     case "search.fallback":
       return `  search  primary adapter produced nothing — retrying the round via ${e.adapter}`;
+    case "search.hinted":
+      return `  search  0 results survived --allow-domain — retrying the round with host hint (${e.hosts.join(", ")})`;
+    case "search.fallback-skipped":
+      return `  search  fallback (${e.adapter}) skipped — its results cannot satisfy --allow-domain=${e.allow.join(",")}`;
     case "search.degraded": {
       const parts = e.failures.map(
         (f) => `${f.adapter} ${f.rateLimited ? "rate-limited" : "failed"}`,
@@ -705,10 +711,20 @@ export function renderNoSourcesMessage(err: NoSourcesError): string {
   if (err.searchErrors.length > 3) {
     lines.push(`  … and ${err.searchErrors.length - 3} more search error(s)`);
   }
+  if (err.fallbackSkipped) {
+    lines.push(
+      `  fallback (${err.fallbackSkipped}) skipped: its results cannot satisfy --allow-domain.`,
+    );
+  }
   if (err.candidatesFound > 0) {
     lines.push(
       `  candidates were found but none survived fetch + extraction (robots, fetch errors, paywalls).`,
       `  try: --verbose to see per-URL outcomes, or --ignore-robots if appropriate.`,
+    );
+  } else if (err.droppedByDomainFilter > 0) {
+    lines.push(
+      `  search worked — the domain filter (--allow-domain / --deny-domain) dropped all ${err.droppedByDomainFilter} result(s).`,
+      `  try: widen the filter, or check that an allowed host actually publishes on this topic.`,
     );
   } else if (rateLimited) {
     lines.push(
@@ -1102,6 +1118,19 @@ async function runResearch(
           if (!config.verbose && e.type === "search.fallback") {
             process.stderr.write(
               `deepdive: primary search produced nothing — retrying the round via ${e.adapter}\n`,
+            );
+          }
+          // #147 — both allow-domain recovery paths change (or honestly
+          // decline to change) where sources come from; surface them without
+          // --verbose for the same reason as the fallback above.
+          if (!config.verbose && e.type === "search.hinted") {
+            process.stderr.write(
+              `deepdive: no results survived --allow-domain — retrying with host hint (${e.hosts.join(", ")})\n`,
+            );
+          }
+          if (!config.verbose && e.type === "search.fallback-skipped") {
+            process.stderr.write(
+              `deepdive: fallback (${e.adapter}) skipped — its results cannot satisfy --allow-domain\n`,
             );
           }
           // In --deep streaming mode, prefix each round-after-the-first

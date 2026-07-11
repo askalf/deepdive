@@ -17,6 +17,24 @@ function fake(name, results, fail = false) {
   };
 }
 
+// ── servesDomains (#147) ─────────────────────────────────────────────────────
+
+test("multi: servesDomains is the union when every sub-adapter declares one", () => {
+  const multi = new MultiSearch([
+    { ...fake("wikipedia", []), servesDomains: ["wikipedia.org"] },
+    { ...fake("arxiv", []), servesDomains: ["arxiv.org"] },
+  ]);
+  assert.deepEqual([...multi.servesDomains].sort(), ["arxiv.org", "wikipedia.org"]);
+});
+
+test("multi: one open-web sub-adapter makes the whole fan-out open web", () => {
+  const multi = new MultiSearch([
+    { ...fake("wikipedia", []), servesDomains: ["wikipedia.org"] },
+    fake("duckduckgo", []),
+  ]);
+  assert.equal(multi.servesDomains, undefined);
+});
+
 // ── interleaveResults (pure) ─────────────────────────────────────────────────
 
 test("interleaveResults: round-robin in adapter order, dense re-rank", () => {
