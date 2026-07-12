@@ -10,7 +10,7 @@
 cd "$SRC/deepdive"
 # Tests and fuzz targets never launch a browser — skip the 100MB Chromium pull.
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-npm install --no-audit --no-fund
+npm ci --no-audit --no-fund
 # Targets import the compiled ./dist output (the package is TypeScript).
 npm run build
 
