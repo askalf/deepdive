@@ -1,6 +1,6 @@
 {
   "name": "@askalf/deepdive",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "description": "own your research — local agent, cited answers. Part of Own Your Stack.",
   "type": "module",
   "bin": {
@@ -25,6 +25,8 @@
     "typecheck": "tsc --noEmit",
     "pretest": "npm run build",
     "test": "node --test --test-concurrency=4 test/*.test.mjs",
+    "prefuzz": "npm run build",
+    "fuzz": "node fuzz/run.mjs",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "prepublishOnly": "npm run build"
@@ -67,6 +69,7 @@
     "pdfjs-dist": "^6.0.227"
   },
   "devDependencies": {
+    "@jazzer.js/core": "^4.0.0",
     "@types/node": "^26.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-07-12
+
+### Added — continuous fuzzing of the trust-boundary parsers (ClusterFuzzLite)
+
+deepdive runs over three streams of input it doesn't control: robots.txt bytes an arbitrary web server hands back, the raw text of every page it reads, and whatever the LLM returns. Each now has a Jazzer.js fuzz target pinning its fail-safe contract — `parseRobotsTxt`/`isPathAllowed` never throw or hang on an attacker-controlled robots.txt (the hand-rolled non-backtracking wildcard matcher's linearity claim is now machine-checked), `extractContent` always returns a well-formed result on hostile page text, and the LLM-output boundary (`markdownToHtml`/`escapeHtml` for `--html` export, `parsePlan`/`parseCritique` for the agent loop) never emits unescaped HTML and never fails with anything but a plain `Error`. ClusterFuzzLite runs the targets weekly in CI (`cflite.yml`); `npm run fuzz` is the fast local repro loop. This also closes the OpenSSF Scorecard Fuzzing check.
+
+### Changed — workflow tokens drop to read-only at the top level
+
+`auto-release.yml` and `codeql.yml` granted their write scopes (`contents`, `actions`, `security-events`, …) at the workflow level, so every job in those workflows inherited them. The scopes now live on the single job that uses them and the top level is `contents: read` — closing the three open Scorecard Token-Permissions findings. No behavior change: same steps, same scopes, narrower blast radius.
+
 ## [0.31.0] - 2026-07-11
 
 ### Added — MCP server mode: `deepdive mcp` (#160)
