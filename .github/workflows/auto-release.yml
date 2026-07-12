@@ -26,16 +26,21 @@ on:
     branches: [master]
 
 permissions:
-  contents: write
-  # actions: write lets this run dispatch publish.yml for the tokenless
-  # npm publish. (id-token was needed here back when the publish was
-  # inline; it now lives in publish.yml where the OIDC exchange happens.)
-  actions: write
-  id-token: write # keyless Sigstore signing (attest-build-provenance)
-  attestations: write # persist the attestation in GitHub's store
+  contents: read
 
 jobs:
   release:
+    # Write scopes live on the job, not top-level, so the token every other
+    # (future) job gets stays read-only — OpenSSF Scorecard's
+    # Token-Permissions check zeroes on any top-level write.
+    permissions:
+      contents: write # create the vX.Y.Z tag + release, upload assets
+      # actions: write lets this run dispatch publish.yml for the tokenless
+      # npm publish. (id-token was needed here back when the publish was
+      # inline; it now lives in publish.yml where the OIDC exchange happens.)
+      actions: write
+      id-token: write # keyless Sigstore signing (attest-build-provenance)
+      attestations: write # persist the attestation in GitHub's store
     # Guards stacked so a closed-but-not-merged PR or a merge that didn't
     # touch package.json never fires a release:
     #   1. pull_request event type must be `closed` (implicit from `on:`)
