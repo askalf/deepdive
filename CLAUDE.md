@@ -7,7 +7,7 @@ This file is the project-local instructions for Claude Code and similar agents w
 A local research agent. CLI entry point `deepdive`. Given a question, it:
 1. Asks an LLM to decompose the question into 3–5 sub-queries.
 2. Runs each sub-query through a pluggable search adapter.
-3. Fetches each result page through a Playwright-driven headless Chromium (parallelized, optionally cached to `~/.deepdive/cache/`).
+3. Fetches each result page through a Playwright-driven headless Chromium (parallelized, optionally cached to the XDG cache dir — `~/.cache/deepdive/`, legacy `~/.deepdive/cache/`; see `src/xdg.ts`).
 4. Extracts main content, caps per-source word count.
 5. Asks an LLM to synthesize a cited markdown answer.
 6. (Optional, `--deep`) A critic LLM reviews the draft, names the gaps, and the loop re-runs until the critic says done or N rounds elapse.

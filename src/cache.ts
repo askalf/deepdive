@@ -2,8 +2,9 @@
 // the full FetchedPage JSON at <dir>/<hash>.json with mtime-based TTL.
 //
 // Why file-based: zero runtime deps, survives process restarts, inspectable,
-// and good enough for a single-user local tool. The cache directory defaults
-// to ~/.deepdive/cache/ but tests inject a tmpdir.
+// and good enough for a single-user local tool. The cache directory default
+// is resolved in xdg.ts (XDG cache dir or legacy ~/.deepdive/cache/);
+// tests inject a tmpdir.
 
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
