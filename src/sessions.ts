@@ -1,7 +1,8 @@
 // Session persistence — every successful agent run is saved to disk so
 // the user can iterate on a question without re-running searches or
-// re-fetching pages. Stored at ~/.deepdive/sessions/<id>.json with
-// atomic .tmp + rename semantics, mirroring the cache module.
+// re-fetching pages. Stored as <sessions-dir>/<id>.json (XDG state dir,
+// legacy ~/.deepdive/sessions, or DEEPDIVE_SESSIONS_DIR — see xdg.ts)
+// with atomic .tmp + rename semantics, mirroring the cache module.
 //
 // Schema choice: store the full kept-source content. Yes that means
 // duplication with the page cache, but cache TTLs out (1h default) and
@@ -12,8 +13,8 @@
 // id-resolver (prefix matching) are pure and unit-testable.
 
 import { promises as fs } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { xdgSessionsDir, type XdgOptions } from "./xdg.js";
 import type { Plan, Critique } from "./plan.js";
 import type { SourceWithContent } from "./synthesize.js";
 import type { VerificationReport } from "./verify.js";
@@ -59,8 +60,13 @@ export interface SessionStorageOptions {
 }
 
 // Default sessions directory. Override with DEEPDIVE_SESSIONS_DIR.
-export function defaultSessionsDir(env?: Record<string, string | undefined>): string {
-  return env?.DEEPDIVE_SESSIONS_DIR ?? join(homedir(), ".deepdive", "sessions");
+// Resolution beneath the override: legacy ~/.deepdive/sessions if that
+// dir exists, else the XDG state dir (#179). `opts` is test injection.
+export function defaultSessionsDir(
+  env?: Record<string, string | undefined>,
+  opts?: XdgOptions,
+): string {
+  return env?.DEEPDIVE_SESSIONS_DIR ?? xdgSessionsDir(env, opts);
 }
 
 // Session ID format: `2026-05-07_HHMMSS_<8-hex>`. Sortable

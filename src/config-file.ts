@@ -1,6 +1,7 @@
 // Config file + profile support. A user can persist their defaults in
-// ~/.deepdive/config.json (override the path with DEEPDIVE_CONFIG) so they
-// don't retype --base-url / --model / --search every run, and can define named
+// the config file (XDG config dir, legacy ~/.deepdive/config.json, or the
+// DEEPDIVE_CONFIG override — see xdg.ts) so they don't retype
+// --base-url / --model / --search every run, and can define named
 // profiles for common modes.
 //
 // The trick that keeps this from touching the stable resolveConfig() at all:
@@ -14,8 +15,7 @@
 // (`loadConfigFile`) so the mapping is unit-testable without disk.
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { xdgConfigFilePath, type XdgOptions } from "./xdg.js";
 
 // A config object — the file's top level, or one profile. Friendly keys
 // (see KEY_MAP); unknown keys are ignored by fileConfigToEnv.
@@ -124,9 +124,14 @@ export function knownConfigKeys(): string[] {
   return Object.keys(KEY_MAP);
 }
 
-// Default config path, override with DEEPDIVE_CONFIG.
-export function defaultConfigPath(env: Record<string, string | undefined>): string {
-  return env.DEEPDIVE_CONFIG ?? join(homedir(), ".deepdive", "config.json");
+// Default config path, override with DEEPDIVE_CONFIG. Resolution beneath
+// the override: legacy ~/.deepdive/config.json if that dir exists, else
+// the XDG config dir (#179). `opts` is test injection for the legacy check.
+export function defaultConfigPath(
+  env: Record<string, string | undefined>,
+  opts?: XdgOptions,
+): string {
+  return env.DEEPDIVE_CONFIG ?? xdgConfigFilePath(env, opts);
 }
 
 // Reads + parses the config file. A missing file is not an error (returns

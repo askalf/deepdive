@@ -58,7 +58,18 @@ test("knownConfigKeys: includes the headline settings", () => {
 
 test("defaultConfigPath: respects DEEPDIVE_CONFIG", () => {
   assert.equal(defaultConfigPath({ DEEPDIVE_CONFIG: "/x/y.json" }), "/x/y.json");
-  assert.match(defaultConfigPath({}), /\.deepdive[/\\]config\.json$/);
+});
+
+test("defaultConfigPath: legacy ~/.deepdive wins when present, XDG otherwise", () => {
+  const legacy = defaultConfigPath({}, { legacyDirExists: () => true });
+  assert.match(legacy, /\.deepdive[/\\]config\.json$/);
+  const xdg = defaultConfigPath({}, { legacyDirExists: () => false });
+  assert.match(xdg, /\.config[/\\]deepdive[/\\]config\.json$/);
+  const custom = defaultConfigPath(
+    { XDG_CONFIG_HOME: "/custom/cfg" },
+    { legacyDirExists: () => false },
+  );
+  assert.match(custom, /[/\\]custom[/\\]cfg[/\\]deepdive[/\\]config\.json$/);
 });
 
 test("loadConfigFile: missing file is not an error", () => {

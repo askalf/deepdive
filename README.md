@@ -420,7 +420,7 @@ Run `deepdive --help` for the full list. The ones you'll reach for:
 | `--allow-domain=<list>` | — | Comma-separated hostname suffixes — keep only matching URLs. |
 | `--deny-domain=<list>` | — | Comma-separated hostname suffixes — drop matching URLs. |
 | `--api-format=<anthropic\|openai>` | auto | Wire format for the LLM endpoint. Auto-detected from `--base-url`. |
-| `--no-sessions` | off | Don't persist this run to `~/.deepdive/sessions/`. |
+| `--no-sessions` | off | Don't persist this run to the sessions dir. |
 | `--json` | markdown | Emit `{question, plan, rounds, sources, answer, verification, sourceTrust, cost, usage}` for piping. |
 | `--out=<path>` | — | Save to file. |
 | `--verbose`, `-v` | — | Stream plan / search / fetch / critique / verify events to stderr. |
@@ -431,7 +431,7 @@ Every flag mirrors a `DEEPDIVE_*` env var. CLI flags win over env.
 
 ## Config file and profiles
 
-If you keep passing the same flags, persist them. `~/.deepdive/config.json` (override the path with `DEEPDIVE_CONFIG`) is a JSON object of friendly-named defaults, an optional `profiles` map, and an optional `defaultProfile`:
+If you keep passing the same flags, persist them. `~/.config/deepdive/config.json` (override the path with `DEEPDIVE_CONFIG`) is a JSON object of friendly-named defaults, an optional `profiles` map, and an optional `defaultProfile`:
 
 ```json
 {
@@ -460,6 +460,16 @@ deepdive "..." --profile=audit     # your config-file profile
 Built-ins: `deep` (3 rounds), `thorough` (4 rounds + 20 sources + strict cites), `fast` (high concurrency, single-pass), `cheap` (haiku for plan/critic, sonnet for synth), `strict` (fail on weak citations). A config-file profile of the same name overrides a built-in.
 
 **Precedence**, lowest to highest: built-in defaults → config-file base → selected profile → environment variables → CLI flags. So a profile sets a baseline you can still override per-run with an env var or a flag; a config file never silently wins over something you typed.
+
+**Where deepdive keeps its files** — fresh installs follow the [XDG Base Directory spec](https://specifications.freedesktop.org/basedir-spec/latest/):
+
+| What | Default | Env override |
+|---|---|---|
+| Config | `$XDG_CONFIG_HOME/deepdive/config.json` (`~/.config/…`) | `DEEPDIVE_CONFIG` |
+| Page cache | `$XDG_CACHE_HOME/deepdive` (`~/.cache/…`) | `DEEPDIVE_CACHE_DIR` |
+| Sessions | `$XDG_STATE_HOME/deepdive/sessions` (`~/.local/state/…`) | `DEEPDIVE_SESSIONS_DIR` |
+
+If you have a legacy `~/.deepdive/` directory from an earlier install, it keeps being used for all three — nothing moves unless you move it (delete or relocate the directory and the XDG paths take over).
 
 ## Shell completion
 
@@ -539,7 +549,7 @@ deepdive doctor — v0.31.0
   --- deepdive    v0.31.0
 
 # cache
-  --- dir         ~/.deepdive/cache
+  --- dir         ~/.cache/deepdive
   OK  writable    yes
   --- entries     42 files · 18.3 MB
   --- oldest      3h ago
@@ -567,7 +577,7 @@ Exit code is 1 if anything's broken, 0 otherwise. `--json` for structured output
 
 ## Caching
 
-Every successful fetch goes to `~/.deepdive/cache/<sha256>.json` with a 1-hour TTL. A re-run of the same question — or a follow-up run that re-fetches overlapping URLs — never re-opens Chromium for sources it already has. Iteration during question refinement is free.
+Every successful fetch goes to `~/.cache/deepdive/<sha256>.json` (legacy installs: `~/.deepdive/cache/`) with a 1-hour TTL. A re-run of the same question — or a follow-up run that re-fetches overlapping URLs — never re-opens Chromium for sources it already has. Iteration during question refinement is free.
 
 Disable with `--no-cache` or `DEEPDIVE_NO_CACHE=1`. Change the dir with `DEEPDIVE_CACHE_DIR`. Change the TTL with `--cache-ttl-ms` or `DEEPDIVE_CACHE_TTL_MS`.
 
@@ -575,7 +585,7 @@ Disable with `--no-cache` or `DEEPDIVE_NO_CACHE=1`. Change the dir with `DEEPDIV
 
 ## Sessions
 
-Every successful run is saved to `~/.deepdive/sessions/<id>.json` — the full plan, round trace, kept sources (with their extracted content), the answer, the verification report, and the cost estimate. After each run deepdive prints the session id on stderr:
+Every successful run is saved to `~/.local/state/deepdive/sessions/<id>.json` (legacy installs: `~/.deepdive/sessions/`) — the full plan, round trace, kept sources (with their extracted content), the answer, the verification report, and the cost estimate. After each run deepdive prints the session id on stderr:
 
 ```
 session  2026-05-07_134509_5959f102  (deepdive resume 2026-05-07_134509_5959f102)

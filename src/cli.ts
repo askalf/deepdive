@@ -158,7 +158,7 @@ Flags:
                                 bare: 2. No deep pass when flag absent.
   --profile=<name>              Apply a named preset: deep | thorough | fast | cheap |
                                 strict, or one defined in your config file. Layered
-                                beneath env + flags. See ~/.deepdive/config.json.
+                                beneath env + flags. See "Config file" below.
   --concurrency=<n>             Parallel fetches. Default: 4
   --no-cache                    Disable the on-disk page cache (default: enabled)
   --cache-ttl-ms=<ms>           Page cache TTL. Default: 3600000 (1 hour)
@@ -215,7 +215,7 @@ Flags:
   --no-stream                   Buffer the final answer instead of streaming
                                 tokens to stdout (auto-off for --json and
                                 non-TTY stdout)
-  --no-sessions                 Do not persist this run to ~/.deepdive/sessions/
+  --no-sessions                 Do not persist this run to the sessions dir
   --version, -V                 Print the deepdive version and exit
   --help, -h                    Show this help
 
@@ -243,10 +243,20 @@ Exit codes:
   backend rate-limiting — the message names the cause)
 
 Config file:
-  ~/.deepdive/config.json (override path with DEEPDIVE_CONFIG) — JSON object of
-  default settings (friendly keys: model, search, deep, concurrency, …), an
-  optional "profiles" map, and an optional "defaultProfile". Precedence:
+  $XDG_CONFIG_HOME/deepdive/config.json — ~/.config/deepdive/config.json by
+  default (override path with DEEPDIVE_CONFIG; an existing legacy ~/.deepdive/
+  keeps being used as-is) — JSON object of default settings (friendly keys:
+  model, search, deep, concurrency, …), an optional "profiles" map, and an
+  optional "defaultProfile". Precedence:
   CLI flags > env vars > --profile > config-file base > built-in defaults.
+
+Data locations:
+  Fresh installs follow the XDG spec: config ~/.config/deepdive, page cache
+  ~/.cache/deepdive, sessions ~/.local/state/deepdive/sessions (respecting
+  XDG_CONFIG_HOME / XDG_CACHE_HOME / XDG_STATE_HOME). If a legacy ~/.deepdive/
+  directory exists it keeps winning for all three — nothing moves without you
+  moving it. DEEPDIVE_CONFIG / DEEPDIVE_CACHE_DIR / DEEPDIVE_SESSIONS_DIR
+  override everything.
 `;
 
 interface ParsedArgs {

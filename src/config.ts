@@ -1,8 +1,7 @@
 // Config resolution — merges CLI flags, env vars, and defaults.
 // Env vars are prefixed DEEPDIVE_* to avoid collisions in the user's shell.
 
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { xdgCacheDir } from "./xdg.js";
 import type { LLMConfig } from "./llm.js";
 import type { BrowserOptions } from "./browser.js";
 import { parseDomainList, type DomainFilter } from "./domain-filter.js";
@@ -253,7 +252,7 @@ export function resolveConfig(
       : true;
 
   const cacheDir =
-    env.DEEPDIVE_CACHE_DIR ?? join(homedir(), ".deepdive", "cache");
+    env.DEEPDIVE_CACHE_DIR ?? xdgCacheDir(env);
 
   const cacheTtlMs =
     flags.cacheTtlMs ??

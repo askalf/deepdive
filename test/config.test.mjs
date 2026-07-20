@@ -178,7 +178,7 @@ test("resolveConfig: cache ttl default 1h, env/flag override", () => {
   );
 });
 
-test("resolveConfig: DEEPDIVE_CACHE_DIR overrides default ~/.deepdive/cache", () => {
+test("resolveConfig: DEEPDIVE_CACHE_DIR overrides the default cache dir", () => {
   const c = resolveConfig({}, { DEEPDIVE_CACHE_DIR: "/tmp/custom-cache" });
   assert.equal(c.cache.dir, "/tmp/custom-cache");
 });
