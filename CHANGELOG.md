@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-07-20
+
 ### Changed — XDG Base Directory layout for fresh installs (#179)
 
 deepdive kept everything under a single `~/.deepdive/`. Fresh installs now follow the XDG Base Directory spec: config at `$XDG_CONFIG_HOME/deepdive/config.json` (`~/.config/…`), the page cache at `$XDG_CACHE_HOME/deepdive` (`~/.cache/…`), and sessions at `$XDG_STATE_HOME/deepdive/sessions` (`~/.local/state/…`). Existing setups don't move: whenever a legacy `~/.deepdive/` directory exists it keeps winning for all three paths, and the `DEEPDIVE_CONFIG` / `DEEPDIVE_CACHE_DIR` / `DEEPDIVE_SESSIONS_DIR` overrides still beat everything. Resolution lives in one place (`src/xdg.ts`, injectable legacy check) and is pinned by `test/xdg.test.mjs` — including the spec rule that relative `XDG_*` values are ignored.
