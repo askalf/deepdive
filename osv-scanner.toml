@@ -1,0 +1,30 @@
+# OSV / OpenSSF Scorecard vulnerability suppressions.
+#
+# Scorecard's Vulnerabilities check reads this file automatically when it sits
+# next to the manifest it applies to (no CLI flag needed). Every entry MUST set
+# an `ignoreUntil` so a suppression cannot outlive the reason for it.
+
+[[IgnoredVulns]]
+id = "GHSA-frvp-7c67-39w9"
+ignoreUntil = 2026-10-24
+reason = '''
+Advisory range is stale, and the vulnerable code path is not reachable here.
+
+Fixed upstream in @hono/node-server 1.19.15 (published 2026-07-24), which
+backports the serve-static fix to the 1.x line: the traversal guard in
+dist/serve-static.js gains a bare-backslash rejection.
+
+  1.19.14  /(?:^|[\/\\])\.{1,2}(?:$|[\/\\])|[\/\\]{2,}/
+  1.19.15  /(?:^|[\/\\])\.{1,2}(?:$|[\/\\])|[\/\\]{2,}|\\/
+
+The GitHub advisory still declares "< 2.0.5" / first-patched 2.0.5 and has not
+been updated to reflect the backport, so OSV keeps matching our pinned 1.19.15.
+This entry exists only to cover that metadata lag: drop it as soon as the
+advisory range is corrected upstream to exclude 1.19.15.
+
+Reachability: @hono/node-server is a transitive dep of
+@modelcontextprotocol/sdk, which pins ^1.19.9 and uses the package only for its
+HTTP transport. Neither the SDK's dist nor this repo's src imports serveStatic,
+so the affected middleware is never mounted. npm's suggested remediation is a
+downgrade to @modelcontextprotocol/sdk 1.24.3, which is a regression, not a fix.
+'''
