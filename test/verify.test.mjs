@@ -11,6 +11,7 @@ import {
   contentTokens,
   recall,
   stripSourcesBlock,
+  isSourceDisclaimer,
   DEFAULT_CITE_MIN_RECALL,
 } from "../dist/verify.js";
 
@@ -210,4 +211,71 @@ test("verifyCitations: strips an appended Sources block before verifying", () =>
   const r = verifyCitations(answer, sources);
   assert.equal(r.checks.length, 1, "only the body sentence is checked");
   assert.equal(r.totalCitations, 1);
+});
+
+// ── source-disclaimer exclusion (issue #186) ────────────────────────────────
+//
+// The synthesizer sometimes names the sources it DISCARDED. Those bracketed ids
+// were being scored as citations, each correctly failing recall against the
+// disclaimer sentence, so the answer was penalised for being transparent.
+// A live run scored 0.52 with 7 of its 10 "unsupported" cites from one such
+// sentence.
+
+test("isSourceDisclaimer: needs BOTH a source noun and an exclusion phrase", () => {
+  assert.equal(
+    isSourceDisclaimer("sources [3], [5] contain no information about X and are not cited below"),
+    true,
+  );
+  // A source noun alone is not enough — this is a real claim about sources.
+  assert.equal(isSourceDisclaimer("These sources agree on the mechanism [1][2]."), false);
+  // An exclusion phrase alone is not enough — THIS is the false positive that
+  // matters: a genuine negative finding must never be swallowed.
+  assert.equal(isSourceDisclaimer("The trial showed no improvement over baseline [4]."), false);
+  assert.equal(isSourceDisclaimer("The model does not address long-context recall [4]."), false);
+});
+
+test("verifyCitations: a discarded-sources disclaimer is excluded, not counted", () => {
+  const answer =
+    "Note that sources [2] and [3] contain no information about this topic and are not cited below. " +
+    "Claude's rate limiter uses a five-hour bucket and a seven-day bucket [1].";
+  const r = verifyCitations(answer, sources);
+  assert.equal(r.totalCitations, 1, "only the real claim is counted");
+  assert.equal(r.supportedCitations, 1);
+  assert.equal(r.unsupported.length, 0, "the disclaimer must not create unsupported cites");
+  assert.equal(r.disclaimers.length, 1, "and it is RECORDED, not silently dropped");
+  assert.deepEqual(r.disclaimers[0].citedIds, [2, 3]);
+});
+
+test("verifyCitations: a disclaimer-shaped sentence with ANY supported cite still counts", () => {
+  // The safety property. `sources` here genuinely supports [1], so even though
+  // the sentence reads like a disclaimer it is a real claim and stays in the
+  // books — this is what stops the rule burying a partially-bogus citation.
+  const answer =
+    "The sources contain no contradiction: the rate limiter uses a five-hour " +
+    "rolling bucket and a seven-day rolling bucket [1][3].";
+  const r = verifyCitations(answer, sources);
+  assert.equal(r.disclaimers.length, 0, "not skipped — one cite cleared the threshold");
+  assert.equal(r.totalCitations, 2, "both cites stay in the books");
+  assert.equal(r.supportedCitations, 1, "[1] supported, [3] (cats) is not");
+});
+
+test("verifyCitations: a fully-unsupported ordinary claim is still flagged", () => {
+  // No source noun, so the disclaimer rule cannot apply. Regression guard: the
+  // fix must not weaken the hallucinated-citation detection it sits next to.
+  const answer = "Quantum tunnelling explains the observed latency [2].";
+  const r = verifyCitations(answer, sources);
+  assert.equal(r.disclaimers.length, 0);
+  assert.equal(r.totalCitations, 1);
+  assert.equal(r.unsupported.length, 1, "still caught as unsupported");
+});
+
+test("verifyCitations: issue #186 end-to-end — transparency no longer costs the score", () => {
+  const disclaimer =
+    "The relevant sources provide the following picture — note that sources [2] and [3] " +
+    "contain no information about this topic and are not cited below.";
+  const supported =
+    "Claude's rate limiter uses a five-hour bucket and a seven-day bucket [1].";
+  const r = verifyCitations(`${disclaimer} ${supported}`, sources);
+  const ratio = r.supportedCitations / r.totalCitations;
+  assert.equal(ratio, 1, "one claim, fully supported -> 1.00 (was 0.33 before the fix)");
 });
