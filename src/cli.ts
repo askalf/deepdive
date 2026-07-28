@@ -612,8 +612,14 @@ function renderEvent(e: AgentEvent): string {
         : `  critic  ${e.critique.queries.length} follow-up quer${e.critique.queries.length === 1 ? "y" : "ies"}`;
     case "verify.done": {
       const r = e.report;
+      // Sentences excluded as source-disclaimers are reported, not hidden —
+      // an exclusion nobody can see is indistinguishable from a miscount.
+      const skipped = r.disclaimers?.length
+        ? `  verify  ${r.disclaimers.length} disclaimer sentence${r.disclaimers.length === 1 ? "" : "s"} excluded (names discarded sources, makes no claim)`
+        : null;
       if (r.unsupported.length === 0) {
-        return `  verify  ${r.supportedCitations}/${r.totalCitations} citations supported`;
+        const ok = `  verify  ${r.supportedCitations}/${r.totalCitations} citations supported`;
+        return skipped ? `${ok}\n${skipped}` : ok;
       }
       const lines = [
         `  verify  ⚠ ${r.totalCitations - r.supportedCitations}/${r.totalCitations} citations weak (threshold ${r.threshold})`,
@@ -624,6 +630,7 @@ function renderEvent(e: AgentEvent): string {
           .join(", ");
         lines.push(`          ⚠ "${ellipsize(c.sentence, 80)}" — ${worst}`);
       }
+      if (skipped) lines.push(skipped);
       return lines.join("\n");
     }
     case "llm.call":

@@ -31,10 +31,59 @@ export interface VerificationReport {
   supportedCitations: number;
   checks: CitationCheck[];
   unsupported: CitationCheck[];
+  /**
+   * Sentences excluded from citation accounting because they talk ABOUT sources
+   * rather than cite them (see isSourceDisclaimer). Recorded rather than dropped
+   * so the exclusion is auditable — a verifier that silently ignores sentences
+   * is worse than one that miscounts them.
+   */
+  disclaimers: CitationCheck[];
 }
 
 export interface VerifyOptions {
   threshold?: number;
+}
+
+/**
+ * A noun that makes the sentence about the SOURCES themselves ("sources [3],
+ * [5] …"), not about the subject matter.
+ */
+const SOURCE_NOUN_RE = /\b(sources?|references?|citations?)\b/i;
+
+/**
+ * A phrase asserting those sources carry nothing useful. Deliberately narrow —
+ * it must be an exclusion CLAIM, not any old negation, or a real finding like
+ * "the trial showed no improvement [4]" would be swallowed.
+ */
+const SOURCE_EXCLUSION_RE =
+  /\b(no information|contains? no|have no|has no|not cited|were not used|are not used|not relevant|irrelevant|excluded|nothing (?:about|on|relevant)|do(?:es)? not (?:address|discuss|mention|contain))\b/i;
+
+/**
+ * True when a sentence is a source-DISCLAIMER: it names sources only to say
+ * they were discarded.
+ *
+ * Why this exists (issue #186): the synthesizer sometimes writes an honest
+ * aside like
+ *
+ *   "note that sources [3], [5], [7], [8], [9], [11], and [12] contain no
+ *    information about ternary LLM accuracy and are not cited below."
+ *
+ * extractCiteIds pulls seven ids out of that, each is recall-checked against
+ * the disclaimer sentence, each correctly fails (they ARE irrelevant), and all
+ * seven land in unsupportedIds. The answer is penalised precisely for being
+ * transparent about which sources it rejected — one live run scored 0.52 with
+ * 7 of its 10 "unsupported citations" coming from a single such sentence.
+ *
+ * The caller applies this ONLY when every cited id in the sentence also fails
+ * the recall threshold. Both conditions are required, and that pairing is the
+ * safety property: a sentence with even one supported cite is a real claim and
+ * is never skipped, so this cannot quietly bury a partially-hallucinated
+ * citation. The residual gap is a fully-unsupported claim that also happens to
+ * name "sources" and negate them — rare phrasing, and it still surfaces in
+ * `disclaimers` rather than vanishing.
+ */
+export function isSourceDisclaimer(sentence: string): boolean {
+  return SOURCE_NOUN_RE.test(sentence) && SOURCE_EXCLUSION_RE.test(sentence);
 }
 
 export function verifyCitations(
@@ -52,6 +101,7 @@ export function verifyCitations(
   }
 
   const checks: CitationCheck[] = [];
+  const disclaimers: CitationCheck[] = [];
   let totalCitations = 0;
   let supportedCitations = 0;
 
@@ -63,25 +113,35 @@ export function verifyCitations(
     const recallByCite: Record<number, number> = {};
     const unsupportedIds: number[] = [];
 
+    // Score first, tally after. The disclaimer test below needs to know whether
+    // EVERY cite failed, so the counters must not be advanced until we know
+    // this sentence is a real claim — otherwise a skipped sentence still
+    // pollutes totalCitations and the ratio it was meant to fix.
     for (const id of citedIds) {
       const tokens = sourceTokens.get(id);
       const r = tokens ? recall(claimTokens, tokens) : 0;
       recallByCite[id] = r;
-      totalCitations += 1;
-      if (r >= threshold) {
-        supportedCitations += 1;
-      } else {
-        unsupportedIds.push(id);
-      }
+      if (r < threshold) unsupportedIds.push(id);
     }
 
-    checks.push({
+    const check: CitationCheck = {
       sentence: sentence.trim(),
       citedIds,
       unsupportedIds,
       recallByCite,
       supported: unsupportedIds.length === 0,
-    });
+    };
+
+    // A source-disclaimer only counts as one when NOTHING in it is supported.
+    // One supported cite means it is making a claim, so it stays in the books.
+    if (unsupportedIds.length === citedIds.length && isSourceDisclaimer(sentence)) {
+      disclaimers.push(check);
+      continue;
+    }
+
+    totalCitations += citedIds.length;
+    supportedCitations += citedIds.length - unsupportedIds.length;
+    checks.push(check);
   }
 
   return {
@@ -90,6 +150,7 @@ export function verifyCitations(
     supportedCitations,
     checks,
     unsupported: checks.filter((c) => !c.supported),
+    disclaimers,
   };
 }
 
