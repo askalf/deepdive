@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-07-29
+
+### Fixed — a source disclaimer no longer counts against the citation score (#186)
+
+When the synthesizer was transparent about which sources it discarded — "note that sources [3], [5], [7], [8], [9], [11], and [12] contain no information about ternary LLM accuracy and are not cited below" — the verifier pulled seven citation ids out of that aside, recall-checked each against the disclaimer sentence, and counted all seven as unsupported. Honesty about rejected sources became the single largest penalty an answer could take: one nightly canary run scored `supportRatio` 0.52 with 7 of its 10 unsupported citations coming from that one sentence.
+
+A sentence is now excluded from citation accounting only when it both reads as a source-disclaimer (it names sources *and* asserts they carry nothing useful) **and** has no supported citation of its own. Both conditions are required, and that pairing is the safety property: one supported cite means the sentence is making a claim, so it is never skipped — the rule cannot bury a partially-hallucinated citation. The disclaimer test is deliberately an exclusion *claim* rather than any negation, so a genuine negative finding like "the trial showed no improvement [4]" is untouched. Excluded sentences are reported in `verification.disclaimers` and printed by the CLI rather than silently dropped, because an exclusion nobody can see is indistinguishable from a miscount.
+
 ## [0.32.0] - 2026-07-20
 
 ### Changed — XDG Base Directory layout for fresh installs (#179)
