@@ -15,6 +15,12 @@
   <a href="https://github.com/askalf/deepdive/blob/master/LICENSE"><img src="https://img.shields.io/npm/l/@askalf/deepdive" alt="License"></a>
 </p>
 
+<!-- deepdive on Glama — uncomment once the server is indexed in the directory (submit at https://glama.ai/mcp/servers; glama.json is already in place):
+<p align="center">
+  <a href="https://glama.ai/mcp/servers/askalf/deepdive"><img src="https://glama.ai/mcp/servers/askalf/deepdive/badges/card.svg" alt="deepdive on Glama"></a>
+</p>
+-->
+
 ---
 
 ## What you keep
