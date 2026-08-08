@@ -1,0 +1,75 @@
+name: bench board
+
+# Publishes a public authority-compare board for every release — the receipt
+# that each shipped version was measured, not just built.
+#
+# WHY THIS WORKFLOW ONLY DISPATCHES, AND DOES NOT RUN THE BENCH ITSELF:
+# the bench needs a live LLM (dario) and a search backend (searxng). Both are
+# internal services on the Hetzner box, reachable only from a self-hosted
+# runner there. This repository is PUBLIC, and a self-hosted runner attached to
+# a public repo is the fork-RCE vector (a pull_request workflow from any fork
+# executes on the runner host) — so the runner stays registered to the PRIVATE
+# platform repo, and this job just asks it to run. Execution is private; the
+# board it commits back here is public. Do not "simplify" this by adding
+# `runs-on: [self-hosted, …]` to this file.
+#
+# The board lands as a commit on this repo from the platform side; see
+# askalf/platform .github/workflows/deepdive-bench.yml for the runner half.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Single question id to run (default: full 6-question board)'
+        required: false
+        default: ''
+      ref:
+        description: 'Tag or sha to bench (default: the default branch)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    # Never run from a fork, and never from a repo that isn't ours — the
+    # dispatch carries a token for a private repo.
+    if: github.repository == 'askalf/deepdive'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask the private runner to bench this version
+        env:
+          # Fine-grained PAT with Contents:write on askalf/platform (needed to
+          # send a repository_dispatch). Absent => this step warns and exits 0,
+          # because a missing bench secret must never fail a release.
+          DISPATCH_TOKEN: ${{ secrets.BENCH_DISPATCH_TOKEN }}
+          REF: ${{ inputs.ref || github.event.release.tag_name || github.ref_name }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          set -eo pipefail
+          if [ -z "${DISPATCH_TOKEN:-}" ]; then
+            echo "::warning::BENCH_DISPATCH_TOKEN is not set — skipping the bench dispatch."
+            echo "The release itself is unaffected. Add the secret to enable per-release boards."
+            exit 0
+          fi
+          echo "Dispatching bench for ref '${REF}'${ONLY:+ (only=${ONLY})}"
+          payload=$(REF="$REF" ONLY="$ONLY" RUN_ID="${{ github.run_id }}" node -e '
+            const p = {
+              event_type: "deepdive-bench",
+              client_payload: {
+                ref: process.env.REF,
+                only: process.env.ONLY || "",
+                requested_by: "deepdive#" + process.env.RUN_ID,
+              },
+            };
+            process.stdout.write(JSON.stringify(p));
+          ')
+          # --input - keeps the payload off the process argv (it is not secret,
+          # but argv is the wrong channel by habit; the token never appears there).
+          printf '%s' "$payload" | GH_TOKEN="$DISPATCH_TOKEN" \
+            gh api repos/askalf/platform/dispatches --input - --silent
+          echo "Dispatched. The board will be committed back to this repo when the run finishes."
