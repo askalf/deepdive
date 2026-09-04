@@ -1,0 +1,73 @@
+# Path → label map for .github/workflows/pr-triage.yml (actions/labeler v7).
+#
+# Additive only: sync-labels is off, so nothing here ever strips a label a
+# human — or Dependabot — put on a PR by hand. Add a path, get a label.
+#
+# Bare-noun labels, matching the Own Your Stack family vocabulary (redstamp is
+# the reference), so a reader moving between repos sees the same words.
+
+agent:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/agent.ts'
+          - 'src/confidence.ts'
+          - 'src/citations.ts'
+
+browser:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/browser.ts'
+          - 'src/extract.ts'
+          - 'src/domain-filter.ts'
+
+llm:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/llm.ts'
+          - 'src/llm-format.ts'
+          - 'src/llm-stream.ts'
+          - 'src/completion.ts'
+
+cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/cli.ts'
+          - 'src/doctor.ts'
+          - 'src/config.ts'
+          - 'src/config-file.ts'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'test/**'
+          - '**/*.test.mjs'
+
+fuzz:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'fuzz/**'
+          - '.clusterfuzzlite/**'
+
+bench:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'bench/**'
+
+github_actions:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/labeler.yml'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'README.md'
+          - 'CHANGELOG.md'
+          - 'CONTRIBUTING.md'
+          - 'CODE_OF_CONDUCT.md'
+          - 'SECURITY.md'
+          - 'docs/**'
+          - '.github/ISSUE_TEMPLATE/**'
+          - '.github/pull_request_template.md'
+
